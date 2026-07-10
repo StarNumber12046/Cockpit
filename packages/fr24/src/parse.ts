@@ -7,6 +7,18 @@ import type {
 
 function asString(value: unknown): string {
   if (value == null) return "";
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    return typeof obj.text === "string"
+      ? obj.text
+      : typeof obj.name === "string"
+        ? obj.name
+        : typeof obj.label === "string"
+          ? obj.label
+          : typeof obj.title === "string"
+            ? obj.title
+            : "";
+  }
   return String(value);
 }
 

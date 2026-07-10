@@ -1,26 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useQuery } from "convex/react";
 import {
   getBoundsFromRegion,
   type BoundsString,
   type Fr24Flight,
 } from "@cockpit/fr24";
-import { isEmergencySquawk } from "@cockpit/shared";
-import { api } from "../../lib/convex";
 import { useFr24Detail } from "../../hooks/useFr24Detail";
 import { useFr24Flights } from "../../hooks/useFr24Flights";
+import { useFr24Search } from "../../hooks/useFr24Search";
 import { FlightMap, type MapRegion } from "../../components/FlightMap";
 import { FlightSheet } from "../../components/FlightSheet";
 import { ErrorBanner } from "../../components/ErrorBanner";
+import {
+  FlightSearchBar,
+  FlightSearchResults,
+} from "../../components/FlightSearchBar";
 import { colors, radius, spacing, typography } from "../../constants/theme";
 import {
   normalizeTrailPoints,
@@ -31,6 +27,8 @@ import {
 const REGION_EPSILON = 1e-5;
 /** Debounce after pan/zoom settles before swapping feed bounds. */
 const BOUNDS_DEBOUNCE_MS = 350;
+/** Debounce FR24 search while typing. */
+const SEARCH_DEBOUNCE_MS = 300;
 
 function regionsEqual(a: MapRegion, b: MapRegion): boolean {
   return (
@@ -53,10 +51,15 @@ function regionToBounds(region: MapRegion): BoundsString {
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { results, loading: searchLoading, error: searchError, search, clear } =
+    useFr24Search();
+  const [query, setQuery] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
   /** null until the map publishes its startup region (user location or hub). */
   const [bounds, setBounds] = useState<BoundsString | null>(null);
   const lastRegionRef = useRef<MapRegion | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const onRegionChange = useCallback((region: MapRegion) => {
     const prev = lastRegionRef.current;
@@ -78,18 +81,28 @@ export default function HomeScreen() {
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
   }, []);
 
-  const { flights, loading, refreshing, error, lastUpdated, refresh } =
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    const trimmed = query.trim();
+    if (!trimmed) {
+      clear();
+      return;
+    }
+    searchDebounceRef.current = setTimeout(() => {
+      void search(trimmed);
+    }, SEARCH_DEBOUNCE_MS);
+  }, [query, search, clear]);
+
+  const { flights, loading, error, refresh } =
     useFr24Flights({
       bounds: bounds ?? undefined,
       enabled: bounds != null,
     });
   const [selected, setSelected] = useState<Fr24Flight | null>(null);
-
-  const alerts = useQuery(api.alerts.list, { limit: 20 });
-  const alertCount = alerts?.length ?? 0;
 
   useEffect(() => {
     console.log(
@@ -99,10 +112,34 @@ export default function HomeScreen() {
     );
   }, [flights.length, loading, error]);
 
-  const emergencyCount = useMemo(
-    () => flights.filter((f) => isEmergencySquawk(f.squawk)).length,
-    [flights],
-  );
+  const onSelectSearchHit = (item: {
+    fr24Id?: string;
+    id: string;
+    label: string;
+  }) => {
+    const fr24Id = item.fr24Id ?? item.id;
+    const key = fr24Id;
+    setBusyId(key);
+    const onMap = flights.find((f) => f.fr24Id === fr24Id);
+    if (onMap) {
+      setSelected(onMap);
+      setQuery("");
+      clear();
+      setBusyId(null);
+      return;
+    }
+    setQuery("");
+    clear();
+    setBusyId(null);
+    router.push({
+      pathname: "/flight/[id]",
+      params: {
+        id: fr24Id,
+        flightNumber: item.label.replace(/\s+/g, "").toUpperCase(),
+        callsign: item.label.replace(/\s+/g, "").toUpperCase(),
+      },
+    });
+  };
 
   // Keep sheet in sync if the selected flight moves on poll refresh.
   const selectedLive = useMemo(() => {
@@ -111,7 +148,12 @@ export default function HomeScreen() {
   }, [flights, selected]);
 
   // FR24 detail payload includes past positions (`trail`) for the selected aircraft.
-  const { detail: selectedDetail } = useFr24Detail(selectedLive?.fr24Id);
+  const {
+    detail: selectedDetail,
+    loading: detailLoading,
+    error: detailError,
+    refresh: refreshDetail,
+  } = useFr24Detail(selectedLive?.fr24Id);
 
   // Past-position trail only (no origin→aircraft route line).
   const selectedTrail = useMemo((): TrailPointLike[] | null => {
@@ -123,26 +165,7 @@ export default function HomeScreen() {
     });
   }, [selectedDetail?.trail, selectedLive]);
 
-  const openDetails = (flight: Fr24Flight) => {
-    setSelected(null);
-    router.push({
-      pathname: "/flight/[id]",
-      params: {
-        id: flight.fr24Id,
-        callsign: flight.callsign,
-        flightNumber: flight.flightNumber,
-        icao24: flight.icao24,
-        airlineIcao: flight.airlineIcao,
-        registration: flight.registration,
-      },
-    });
-  };
-
-  const statusLine = loading && flights.length === 0
-    ? "Loading live traffic…"
-    : `${flights.length} aircraft` +
-      (emergencyCount > 0 ? ` · ${emergencyCount} emerg` : "") +
-      (alertCount > 0 ? ` · ${alertCount} alerts` : "");
+  const liveHits = results.live;
 
   return (
     <View style={styles.screen}>
@@ -158,33 +181,31 @@ export default function HomeScreen() {
         style={[styles.chrome, { paddingTop: Math.max(insets.top, spacing.sm) }]}
         pointerEvents="box-none"
       >
-        <View style={styles.hud}>
-          <View style={styles.hudMain}>
-            <Text style={styles.hub}>Live traffic</Text>
-            <Text style={styles.meta}>{statusLine}</Text>
-            {lastUpdated ? (
-              <Text style={styles.metaDim}>
-                Updated {new Date(lastUpdated).toLocaleTimeString()}
-              </Text>
-            ) : loading ? (
-              <Text style={styles.metaDim}>Fetching FR24 feed…</Text>
-            ) : null}
-          </View>
-          <Pressable
-            style={styles.refreshBtn}
-            onPress={() => void refresh()}
-            disabled={refreshing}
-            hitSlop={8}
-          >
-            {loading && flights.length === 0 ? (
-              <ActivityIndicator color={colors.accent} size="small" />
-            ) : (
-              <Text style={styles.refreshText}>
-                {refreshing ? "…" : "↻"}
-              </Text>
-            )}
-          </Pressable>
-        </View>
+        <FlightSearchBar
+          query={query}
+          onChangeQuery={setQuery}
+          loading={searchLoading}
+        />
+
+        {searchError ? (
+          <ErrorBanner
+            message={searchError}
+            onRetry={() => void search(query.trim())}
+          />
+        ) : null}
+
+        {query.trim().length > 0 && liveHits.length > 0 ? (
+          <FlightSearchResults
+            hits={liveHits}
+            busyId={busyId}
+            onSelect={onSelectSearchHit}
+            actionLabel={(item) =>
+              flights.some((f) => f.fr24Id === (item.fr24Id ?? item.id))
+                ? "Show on map"
+                : "Open"
+            }
+          />
+        ) : null}
 
         {error ? (
           <ErrorBanner message={error} onRetry={() => void refresh()} />
@@ -201,7 +222,10 @@ export default function HomeScreen() {
         flight={selectedLive}
         visible={selectedLive != null}
         onClose={() => setSelected(null)}
-        onOpenDetails={openDetails}
+        detail={selectedDetail}
+        detailLoading={detailLoading}
+        detailError={detailError}
+        onRefreshDetail={() => void refreshDetail()}
       />
     </View>
   );
@@ -222,47 +246,6 @@ const styles = StyleSheet.create({
     // Above map badge overlay (zIndex 5) — Android elevation required too.
     zIndex: 50,
     elevation: 50,
-  },
-  hud: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    backgroundColor: "rgba(18, 26, 43, 0.92)",
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  hudMain: {
-    flex: 1,
-    gap: 2,
-  },
-  hub: {
-    ...typography.subtitle,
-    fontSize: 15,
-  },
-  meta: {
-    ...typography.caption,
-    color: colors.textMuted,
-  },
-  metaDim: {
-    ...typography.caption,
-    color: colors.textDim,
-    fontSize: 11,
-  },
-  refreshBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.full,
-    backgroundColor: colors.accentSoft,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  refreshText: {
-    color: colors.accent,
-    fontSize: 18,
-    fontWeight: "700",
   },
   emptyChip: {
     alignSelf: "center",

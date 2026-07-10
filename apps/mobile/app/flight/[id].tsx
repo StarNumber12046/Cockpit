@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Image,
   Pressable,
@@ -8,9 +8,8 @@ import {
   View,
 } from "react-native";
 import { useLocalSearchParams } from "expo-router";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import {
-  formatAltitude,
   formatFlightLabel,
   formatRoute,
   formatTimestamp,
@@ -18,12 +17,13 @@ import {
   type CorrelationKeys,
 } from "@cockpit/shared";
 import { api } from "../../lib/convex";
+import type { Fr24Flight } from "@cockpit/fr24";
 import { useFr24Detail } from "../../hooks/useFr24Detail";
 import { LoadingState } from "../../components/LoadingState";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { SeverityChip } from "../../components/SeverityChip";
-import { AcarsMessageCard } from "../../components/AcarsMessageCard";
+import { FlightDetailBody } from "../../components/FlightDetailBody";
 import { colors, radius, spacing, typography } from "../../constants/theme";
 import {
   airlineLogoCandidates,
@@ -68,77 +68,11 @@ export default function FlightDetailScreen() {
     [keys],
   );
 
-  const acars = useQuery(api.acars.listForFlight, queryArgs);
   const alerts = useQuery(api.alerts.listForFlight, queryArgs);
   const addTracked = useMutation(api.tracked.add);
-  const refreshAcars = useAction(api.acarsLive.refreshForFlight);
 
   const [photo, setPhoto] = useState<AircraftPhoto | null>(null);
   const [photoLoading, setPhotoLoading] = useState(false);
-  const [acarsRefreshing, setAcarsRefreshing] = useState(false);
-  const [acarsLiveError, setAcarsLiveError] = useState<string | null>(null);
-  const [acarsLiveMeta, setAcarsLiveMeta] = useState<string | null>(null);
-  const autoFetchKey = useRef<string | null>(null);
-
-  const canFetchAcars = Boolean(
-    keys.icao24 || keys.callsign || keys.flightNumber,
-  );
-
-  const pullLiveAcars = useCallback(async () => {
-    if (!canFetchAcars) return;
-    setAcarsRefreshing(true);
-    setAcarsLiveError(null);
-    try {
-      const result = await refreshAcars({
-        fr24Id: keys.fr24Id,
-        icao24: keys.icao24,
-        callsign: keys.callsign,
-        flightNumber: keys.flightNumber,
-        limit: 40,
-      });
-      if (!result.ok) {
-        setAcarsLiveError(result.error ?? "Live ACARS fetch failed");
-        setAcarsLiveMeta(null);
-      } else {
-        setAcarsLiveMeta(
-          result.count === 0
-            ? "No recent Airframes messages for this identity"
-            : `Airframes · ${result.count} hit${result.count === 1 ? "" : "s"}` +
-                (result.inserted
-                  ? ` · ${result.inserted} new`
-                  : " · already stored"),
-        );
-      }
-    } catch (err) {
-      setAcarsLiveError(
-        err instanceof Error ? err.message : "Live ACARS fetch failed",
-      );
-      setAcarsLiveMeta(null);
-    } finally {
-      setAcarsRefreshing(false);
-    }
-  }, [
-    canFetchAcars,
-    keys.callsign,
-    keys.flightNumber,
-    keys.fr24Id,
-    keys.icao24,
-    refreshAcars,
-  ]);
-
-  // Auto-pull once per identity when FR24 detail (or route params) yield keys.
-  useEffect(() => {
-    if (!canFetchAcars) return;
-    const key = [
-      keys.fr24Id ?? "",
-      keys.icao24 ?? "",
-      keys.callsign ?? "",
-      keys.flightNumber ?? "",
-    ].join("|");
-    if (autoFetchKey.current === key) return;
-    autoFetchKey.current = key;
-    void pullLiveAcars();
-  }, [canFetchAcars, keys, pullLiveAcars]);
 
   const title = formatFlightLabel({
     callsign: keys.callsign,
@@ -151,7 +85,6 @@ export default function FlightDetailScreen() {
   const dest =
     detail?.airport?.destination?.code?.iata ??
     detail?.airport?.destination?.code?.icao;
-  const trailLen = detail?.trail?.length ?? 0;
   const statusText = detail?.status?.text;
 
   const logoUris = useMemo(
@@ -185,9 +118,7 @@ export default function FlightDetailScreen() {
 
     const icao24 = keys.icao24;
     const reg = detail?.aircraft?.registration || params.registration;
-    // Wait until detail finished loading so we can prefer FR24 images.
     if (loading) {
-      // Still allow Planespotters early if we already have hex/reg.
       if (!icao24 && !reg) return;
     }
 
@@ -216,6 +147,42 @@ export default function FlightDetailScreen() {
       label: title,
     });
   };
+
+  const sheetFlight = useMemo((): Fr24Flight => {
+    const lastTrail = detail?.trail?.[detail.trail.length - 1];
+    return {
+      fr24Id,
+      callsign: keys.callsign ?? "",
+      flightNumber: keys.flightNumber ?? "",
+      icao24: keys.icao24 ?? "",
+      airlineIcao: detail?.airline?.code?.icao || params.airlineIcao || "",
+      registration: registration ?? "",
+      aircraftCode: detail?.aircraft?.model?.code ?? "",
+      originAirportIata: origin ?? "",
+      destinationAirportIata: dest ?? "",
+      altitude: lastTrail?.alt ?? 0,
+      groundSpeed: lastTrail?.spd ?? 0,
+      verticalSpeed: 0,
+      heading: lastTrail?.hd ?? 0,
+      time: lastTrail?.ts ?? 0,
+      onGround: false,
+      squawk: "",
+      latitude: lastTrail?.lat ?? 0,
+      longitude: lastTrail?.lng ?? 0,
+    };
+  },
+    [
+      detail,
+      dest,
+      fr24Id,
+      keys.callsign,
+      keys.flightNumber,
+      keys.icao24,
+      origin,
+      params.airlineIcao,
+      registration,
+    ],
+  );
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -281,93 +248,14 @@ export default function FlightDetailScreen() {
         </Pressable>
       </View>
 
-      {loading ? (
-        <LoadingState label="Loading FR24 detail…" />
-      ) : (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Live detail</Text>
-          <View style={styles.card}>
-            <Row
-              label="Aircraft"
-              value={
-                detail?.aircraft?.model?.text ||
-                detail?.aircraft?.model?.code ||
-                "—"
-              }
-            />
-            <Row
-              label="Registration"
-              value={detail?.aircraft?.registration || "—"}
-            />
-            <Row label="Airline" value={detail?.airline?.name || "—"} />
-            <Row label="Trail points" value={String(trailLen)} />
-            {detail?.trail?.[detail.trail.length - 1] ? (
-              <>
-                <Row
-                  label="Last alt"
-                  value={formatAltitude(
-                    detail.trail[detail.trail.length - 1]?.alt,
-                  )}
-                />
-                <Row
-                  label="Last fix"
-                  value={formatTimestamp(
-                    detail.trail[detail.trail.length - 1]?.ts,
-                  )}
-                />
-              </>
-            ) : null}
-          </View>
-        </View>
-      )}
-
       <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>ACARS</Text>
-          <Pressable
-            style={[
-              styles.refreshBtn,
-              (!canFetchAcars || acarsRefreshing) && styles.refreshBtnDisabled,
-            ]}
-            disabled={!canFetchAcars || acarsRefreshing}
-            onPress={() => void pullLiveAcars()}
-          >
-            <Text style={styles.refreshBtnText}>
-              {acarsRefreshing ? "Fetching…" : "Refresh live"}
-            </Text>
-          </Pressable>
-        </View>
-        {acarsLiveError ? (
-          <View style={styles.acarsError}>
-            <Text style={styles.acarsErrorText}>{acarsLiveError}</Text>
-            <Pressable onPress={() => void pullLiveAcars()} hitSlop={8}>
-              <Text style={styles.refreshBtnText}>Retry</Text>
-            </Pressable>
-          </View>
-        ) : null}
-        {acarsLiveMeta ? (
-          <Text style={styles.liveMeta}>{acarsLiveMeta}</Text>
-        ) : null}
-        <Text style={styles.acarsHint}>
-          Tap a message for a the explanation.
-        </Text>
-        {acars === undefined ||
-        (acarsRefreshing && (acars?.length ?? 0) === 0) ? (
-          <LoadingState label="Loading ACARS…" />
-        ) : acars.length === 0 ? (
-          <EmptyState
-            title="No ACARS for this identity"
-            message={
-              canFetchAcars
-                ? "No stored or recent Airframes messages. Try Refresh live, or open a busier airframe."
-                : "Need ICAO24 / callsign / flight number to search live ACARS."
-            }
-          />
-        ) : (
-          acars.map((msg: (typeof acars)[number]) => (
-            <AcarsMessageCard key={msg._id} message={msg} />
-          ))
-        )}
+        <FlightDetailBody
+          flight={sheetFlight}
+          detail={detail}
+          detailLoading={loading}
+          detailError={error}
+          onRefreshDetail={() => void refresh()}
+        />
       </View>
 
       <View style={styles.section}>
@@ -392,15 +280,6 @@ export default function FlightDetailScreen() {
         )}
       </View>
     </ScrollView>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.kv}>
-      <Text style={styles.k}>{label}</Text>
-      <Text style={styles.v}>{value}</Text>
-    </View>
   );
 }
 
@@ -465,7 +344,6 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: radius.md + 2,
-    // Light plate so multi-color airline logos stay legible on dark UI.
     backgroundColor: "#F4F7FC",
     borderWidth: 1,
     borderColor: colors.border,
@@ -510,57 +388,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
   },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.sm,
-  },
   sectionTitle: {
     ...typography.caption,
     textTransform: "uppercase",
     letterSpacing: 0.6,
     color: colors.textDim,
-  },
-  refreshBtn: {
-    backgroundColor: colors.accentSoft,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  refreshBtnDisabled: {
-    opacity: 0.5,
-  },
-  refreshBtnText: {
-    ...typography.caption,
-    color: colors.accent,
-    fontWeight: "600",
-  },
-  liveMeta: {
-    ...typography.caption,
-    color: colors.success,
-  },
-  acarsHint: {
-    ...typography.caption,
-    color: colors.textDim,
-  },
-  acarsError: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    backgroundColor: colors.dangerSoft,
-    borderColor: colors.danger,
-    borderWidth: 1,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  acarsErrorText: {
-    ...typography.caption,
-    color: colors.danger,
-    flex: 1,
   },
   card: {
     backgroundColor: colors.bgCard,
@@ -584,25 +416,5 @@ const styles = StyleSheet.create({
   body: {
     ...typography.body,
     color: colors.textMuted,
-  },
-  decoded: {
-    ...typography.caption,
-    color: colors.textDim,
-  },
-  kv: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: spacing.md,
-  },
-  k: {
-    ...typography.caption,
-  },
-  v: {
-    fontSize: typography.mono.fontSize,
-    fontWeight: typography.mono.fontWeight,
-    color: colors.text,
-    fontVariant: typography.mono.fontVariant,
-    flexShrink: 1,
-    textAlign: "right",
   },
 });
