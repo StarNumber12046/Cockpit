@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Marker } from "react-native-maps";
 import type { Fr24Flight } from "@cockpit/fr24";
@@ -12,9 +12,10 @@ type Props = {
 };
 
 /**
- * Custom map glyph. Always tracksViewChanges={false} — leaving it true for a
- * large fleet freezes Android after "Android Bundled" (main-thread bitmap work).
- * Appearance updates use a remount key from the parent when selected/emergency changes.
+ * Custom map glyph. tracksViewChanges stays false most of the time so a large
+ * fleet does not freeze Android on snapshot work — but we briefly re-enable it
+ * after mount / appearance changes so the custom view is captured (otherwise
+ * selected remounts render as blank and the aircraft "disappears").
  */
 function AircraftMarkerInner({ flight, selected, onPress }: Props) {
   const emergency = isEmergencySquawk(flight.squawk);
@@ -29,6 +30,13 @@ function AircraftMarkerInner({ flight, selected, onPress }: Props) {
   // ✈ faces ~NE; offset so nose tracks true heading via native rotation.
   const rotation = ((flight.heading % 360) + 360) % 360 - 45;
 
+  const [tracksViewChanges, setTracksViewChanges] = useState(true);
+  useEffect(() => {
+    setTracksViewChanges(true);
+    const timer = setTimeout(() => setTracksViewChanges(false), 500);
+    return () => clearTimeout(timer);
+  }, [selected, emergency, flight.onGround, tint]);
+
   return (
     <Marker
       coordinate={{
@@ -38,8 +46,9 @@ function AircraftMarkerInner({ flight, selected, onPress }: Props) {
       rotation={rotation}
       flat
       anchor={{ x: 0.5, y: 0.5 }}
-      tracksViewChanges={false}
+      tracksViewChanges={tracksViewChanges}
       stopPropagation
+      zIndex={selected ? 10 : emergency ? 5 : 1}
       onPress={(e) => {
         e.stopPropagation();
         onPress?.(flight);

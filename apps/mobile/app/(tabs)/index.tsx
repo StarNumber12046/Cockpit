@@ -16,11 +16,16 @@ import {
 } from "@cockpit/fr24";
 import { isEmergencySquawk } from "@cockpit/shared";
 import { api } from "../../lib/convex";
+import { useFr24Detail } from "../../hooks/useFr24Detail";
 import { useFr24Flights } from "../../hooks/useFr24Flights";
 import { FlightMap, type MapRegion } from "../../components/FlightMap";
 import { FlightSheet } from "../../components/FlightSheet";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { colors, radius, spacing, typography } from "../../constants/theme";
+import {
+  normalizeTrailPoints,
+  type TrailPointLike,
+} from "../../lib/altitudeColor";
 
 /** Ignore tiny region noise so pan jitter does not thrash the FR24 feed. */
 const REGION_EPSILON = 1e-5;
@@ -105,6 +110,19 @@ export default function HomeScreen() {
     return flights.find((f) => f.fr24Id === selected.fr24Id) ?? selected;
   }, [flights, selected]);
 
+  // FR24 detail payload includes past positions (`trail`) for the selected aircraft.
+  const { detail: selectedDetail } = useFr24Detail(selectedLive?.fr24Id);
+
+  // Past-position trail only (no origin→aircraft route line).
+  const selectedTrail = useMemo((): TrailPointLike[] | null => {
+    if (!selectedLive) return null;
+    return normalizeTrailPoints(selectedDetail?.trail as unknown[] | undefined, {
+      lat: selectedLive.latitude,
+      lng: selectedLive.longitude,
+      alt: selectedLive.altitude,
+    });
+  }, [selectedDetail?.trail, selectedLive]);
+
   const openDetails = (flight: Fr24Flight) => {
     setSelected(null);
     router.push({
@@ -129,6 +147,7 @@ export default function HomeScreen() {
       <FlightMap
         flights={flights}
         selectedId={selectedLive?.fr24Id}
+        trail={selectedTrail}
         onSelectFlight={setSelected}
         onRegionChange={onRegionChange}
       />

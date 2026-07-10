@@ -67,7 +67,9 @@ export function buildFlightNarrative(flight: Fr24Flight): string {
 /**
  * FlightDeck-style bottom sheet overlaid on the map (not a full-screen Modal).
  * - Swipe up (or tap) → full detail
- * - Swipe down / tap dim backdrop → dismiss
+ * - Swipe down → dismiss
+ * - Touches outside the sheet pass through so the map stays controllable
+ *   while a plane is tracked (no backdrop dismiss).
  */
 export function FlightSheet({
   flight,
@@ -214,24 +216,8 @@ export function FlightSheet({
     dragY,
   );
 
-  const backdropOpacity = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.4, 0],
-  });
-
   return (
     <View style={styles.root} pointerEvents="box-none">
-      <Pressable
-        style={StyleSheet.absoluteFill}
-        onPress={onClose}
-        accessibilityLabel="Dismiss flight sheet"
-      >
-        <Animated.View
-          style={[styles.backdrop, { opacity: backdropOpacity }]}
-          pointerEvents="none"
-        />
-      </Pressable>
-
       <Animated.View
         style={[
           styles.sheet,
@@ -301,7 +287,7 @@ export function FlightSheet({
           </View>
 
           <Text style={styles.hint}>
-            Swipe up for full detail · down or outside to close
+            Swipe up for full detail · swipe down to close
           </Text>
         </Pressable>
       </Animated.View>
@@ -314,10 +300,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: "flex-end",
     zIndex: 20,
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#000",
   },
   sheet: {
     backgroundColor: colors.bgElevated,

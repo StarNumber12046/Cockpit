@@ -15,7 +15,12 @@ import { HUB } from "../constants/config";
 import { DARK_MAP_STYLE, radiusToLatitudeDelta } from "../constants/mapStyle";
 import { colors, radius, spacing, typography } from "../constants/theme";
 import { useUserLocation } from "../hooks/useUserLocation";
+import {
+  buildTrailSegments,
+  type TrailPointLike,
+} from "../lib/altitudeColor";
 import { AircraftMarker } from "./AircraftMarker";
+import { AircraftTrail } from "./AircraftTrail";
 
 export type MapRegion = Region;
 
@@ -30,6 +35,8 @@ const LOCATION_BOOT_TIMEOUT_MS = 6_000;
 type Props = {
   flights: Fr24Flight[];
   selectedId?: string | null;
+  /** Past positions for the selected aircraft (from FR24 detail trail). */
+  trail?: TrailPointLike[] | null;
   onSelectFlight: (flight: Fr24Flight | null) => void;
   /** Fires when the visible map region settles (pan/zoom end) or on first layout. */
   onRegionChange?: (region: Region) => void;
@@ -65,6 +72,7 @@ function regionAround(
 export function FlightMap({
   flights,
   selectedId,
+  trail,
   onSelectFlight,
   onRegionChange,
 }: Props) {
@@ -73,6 +81,7 @@ export function FlightMap({
       <WebFlightMap
         flights={flights}
         selectedId={selectedId}
+        trail={trail}
         onSelectFlight={onSelectFlight}
         onRegionChange={onRegionChange}
       />
@@ -83,6 +92,7 @@ export function FlightMap({
     <NativeFlightMap
       flights={flights}
       selectedId={selectedId}
+      trail={trail}
       onSelectFlight={onSelectFlight}
       onRegionChange={onRegionChange}
     />
@@ -126,6 +136,7 @@ function useBootRegion(
 function NativeFlightMap({
   flights,
   selectedId,
+  trail,
   onSelectFlight,
   onRegionChange,
 }: Props) {
@@ -204,16 +215,13 @@ function NativeFlightMap({
         onRegionChangeComplete={(region) => {
           onRegionChangeRef.current?.(region);
         }}
-        onPress={() => onSelectFlight(null)}
       >
+        {selectedId ? <AircraftTrail points={trail} /> : null}
         {visibleFlights.map((flight) => {
           const selected = flight.fr24Id === selectedId;
-          const emergency = isEmergencySquawk(flight.squawk);
-          // Remount when appearance changes so tracksViewChanges can stay false.
-          const appearanceKey = `${selected ? 1 : 0}:${emergency ? 1 : 0}:${flight.onGround ? 1 : 0}`;
           return (
             <AircraftMarker
-              key={`${flight.fr24Id}:${appearanceKey}`}
+              key={flight.fr24Id}
               flight={flight}
               selected={selected}
               onPress={onSelectFlight}
@@ -238,6 +246,7 @@ function NativeFlightMap({
 function WebFlightMap({
   flights,
   selectedId,
+  trail,
   onSelectFlight,
   onRegionChange,
 }: Props) {
@@ -274,6 +283,11 @@ function WebFlightMap({
     return (deg / region.latitudeDelta) * size.h;
   };
 
+  const trailSegments = useMemo(
+    () => (selectedId ? buildTrailSegments(trail) : []),
+    [selectedId, trail],
+  );
+
   if (!bootRegion) {
     return (
       <View style={styles.webMap}>
@@ -293,11 +307,7 @@ function WebFlightMap({
       : 28;
 
   return (
-    <Pressable
-      style={styles.webMap}
-      onLayout={onLayout}
-      onPress={() => onSelectFlight(null)}
-    >
+    <View style={styles.webMap} onLayout={onLayout}>
       <View style={styles.webGrid} pointerEvents="none" />
       <View style={styles.webHub} pointerEvents="none">
         <Text style={styles.webHubText}>Your location</Text>
@@ -319,6 +329,39 @@ function WebFlightMap({
           <View style={styles.webUserDot} />
         </View>
       ) : null}
+      {trailSegments.map((seg, segIdx) => {
+        const projected = seg.coordinates.map((c) =>
+          project(c.latitude, c.longitude),
+        );
+        // Draw consecutive edges as thin Views rotated between points.
+        return projected.slice(1).map((end, i) => {
+          const start = projected[i]!;
+          const dx = end.x - start.x;
+          const dy = end.y - start.y;
+          const len = Math.hypot(dx, dy);
+          if (len < 1) return null;
+          const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+          return (
+            <View
+              key={`trail-${segIdx}-${i}`}
+              pointerEvents="none"
+              style={[
+                styles.webTrailSeg,
+                {
+                  left: start.x,
+                  top: start.y,
+                  width: len,
+                  backgroundColor: seg.color,
+                  transform: [
+                    { translateY: -1.5 },
+                    { rotate: `${angle}deg` },
+                  ],
+                },
+              ]}
+            />
+          );
+        });
+      })}
       {flights.map((flight) => {
         const { x, y } = project(flight.latitude, flight.longitude);
         if (x < -20 || y < -20 || x > size.w + 20 || y > size.h + 20) {
@@ -357,7 +400,7 @@ function WebFlightMap({
           </Pressable>
         );
       })}
-    </Pressable>
+    </View>
   );
 }
 
@@ -435,6 +478,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.55,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 0 },
+  },
+  webTrailSeg: {
+    position: "absolute",
+    height: 3,
+    borderRadius: 1.5,
+    transformOrigin: "0 50%",
+    zIndex: 0,
   },
   webMarker: {
     position: "absolute",
