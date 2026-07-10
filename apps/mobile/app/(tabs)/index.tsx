@@ -132,6 +132,8 @@ export default function HomeScreen() {
         callsign: flight.callsign,
         flightNumber: flight.flightNumber,
         icao24: flight.icao24,
+        airlineIcao: flight.airlineIcao,
+        registration: flight.registration,
       },
     });
   };

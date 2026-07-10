@@ -74,6 +74,14 @@ export type Fr24SearchResults = {
   other: Fr24SearchResultItem[];
 };
 
+/** Spotter / stock image entry from FR24 clickhandler. */
+export type Fr24AircraftImage = {
+  src?: string;
+  link?: string;
+  copyright?: string;
+  source?: string;
+};
+
 /** Opaque clickhandler payload; structure varies by flight. */
 export type Fr24FlightDetails = Record<string, unknown> & {
   identification?: {
@@ -85,6 +93,12 @@ export type Fr24FlightDetails = Record<string, unknown> & {
     model?: { code?: string; text?: string };
     registration?: string;
     hex?: string;
+    /** Spotter photos when FR24 includes them on the detail payload. */
+    images?: {
+      thumbnails?: Fr24AircraftImage[];
+      medium?: Fr24AircraftImage[];
+      large?: Fr24AircraftImage[];
+    };
   };
   airline?: { name?: string; short?: string; code?: { iata?: string; icao?: string } };
   airport?: {

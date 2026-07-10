@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Easing,
+  Image,
   PanResponder,
   Pressable,
   StyleSheet,
@@ -18,6 +19,7 @@ import {
   isEmergencySquawk,
 } from "@cockpit/shared";
 import { colors, radius, spacing, typography } from "../constants/theme";
+import { airlineLogoCandidates } from "../lib/media";
 
 type Props = {
   flight: Fr24Flight | null;
@@ -207,6 +209,11 @@ export function FlightSheet({
   const airlineHint =
     display.airlineIcao?.trim().toUpperCase() ||
     label.slice(0, 3).toUpperCase();
+  const logoUris = airlineLogoCandidates({
+    airlineIcao: display.airlineIcao,
+    flightNumber: display.flightNumber,
+    callsign: display.callsign,
+  });
 
   const sheetTranslate = Animated.add(
     progress.interpolate({
@@ -237,9 +244,11 @@ export function FlightSheet({
         >
           <View style={styles.topRow}>
             <View style={styles.identity}>
-              <View style={[styles.badge, emergency ? styles.badgeHot : null]}>
-                <Text style={styles.badgeText}>{airlineHint.slice(0, 3)}</Text>
-              </View>
+              <AirlineBadge
+                logoUris={logoUris}
+                fallback={airlineHint.slice(0, 3)}
+                emergency={emergency}
+              />
               <View style={styles.idText}>
                 <View style={styles.titleRow}>
                   <Text style={styles.callsign} numberOfLines={1}>
@@ -291,6 +300,52 @@ export function FlightSheet({
           </Text>
         </Pressable>
       </Animated.View>
+    </View>
+  );
+}
+
+/**
+ * Airline logo badge. Tries multiple CDN URLs (gstatic → kiwi → avs → FR24)
+ * because FR24 operator assets 403 Android's default okhttp User-Agent.
+ */
+function AirlineBadge({
+  logoUris,
+  fallback,
+  emergency,
+}: {
+  logoUris: string[];
+  fallback: string;
+  emergency: boolean;
+}) {
+  const [uriIndex, setUriIndex] = useState(0);
+  const key = logoUris.join("|");
+
+  useEffect(() => {
+    setUriIndex(0);
+  }, [key]);
+
+  const logoUri = logoUris[uriIndex] ?? null;
+  const showLogo = Boolean(logoUri);
+
+  return (
+    <View style={[styles.badge, emergency ? styles.badgeHot : null]}>
+      {showLogo ? (
+        <Image
+          source={{ uri: logoUri! }}
+          style={styles.badgeLogo}
+          resizeMode="contain"
+          onError={() => {
+            setUriIndex((i) => {
+              // Exhaust candidates → show text fallback.
+              if (i + 1 < logoUris.length) return i + 1;
+              return logoUris.length; // past end → showLogo false
+            });
+          }}
+          accessibilityLabel={`${fallback} airline logo`}
+        />
+      ) : (
+        <Text style={styles.badgeText}>{fallback}</Text>
+      )}
     </View>
   );
 }
@@ -347,21 +402,28 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   badge: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.md,
-    backgroundColor: colors.accentSoft,
+    width: 44,
+    height: 44,
+    borderRadius: radius.md + 2,
+    // Light plate so multi-color airline logos stay legible on dark UI.
+    backgroundColor: "#F4F7FC",
     borderWidth: 1,
-    borderColor: colors.accent,
+    borderColor: colors.border,
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
+    padding: 5,
   },
   badgeHot: {
-    backgroundColor: colors.dangerSoft,
     borderColor: colors.danger,
+    borderWidth: 2,
+  },
+  badgeLogo: {
+    width: "100%",
+    height: "100%",
   },
   badgeText: {
-    color: colors.text,
+    color: colors.bg,
     fontSize: 11,
     fontWeight: "800",
     letterSpacing: 0.4,

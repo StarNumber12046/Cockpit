@@ -29,6 +29,7 @@ export type {
   Fr24SearchResultItem,
   Fr24SearchResults,
   Fr24FlightDetails,
+  Fr24AircraftImage,
   Fr24ClientConfig,
   Fr24ErrorCode,
   Fr24DataSource,
