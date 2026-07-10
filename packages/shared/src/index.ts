@@ -36,3 +36,8 @@ export {
   formatFlightLabel,
   formatLatLon,
 } from "./formatters";
+
+export {
+  normalizeEpochMs,
+  parseFlightStartedAtMs,
+} from "./flightTime";

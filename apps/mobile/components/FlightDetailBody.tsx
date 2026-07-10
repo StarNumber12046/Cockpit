@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useAction, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import type { Fr24FlightDetails } from "@cockpit/fr24";
 import type { Fr24Flight } from "@cockpit/fr24";
 import {
   formatAltitude,
   formatTimestamp,
   keysFromFlight,
+  parseFlightStartedAtMs,
   type CorrelationKeys,
 } from "@cockpit/shared";
 import { api } from "../lib/convex";
@@ -32,12 +33,14 @@ export function FlightDetailBody({
   onRefreshDetail,
 }: Props) {
   const refreshAcars = useAction(api.acarsLive.refreshForFlight);
+  const registerSession = useMutation(api.flightSessions.register);
 
   const keys: CorrelationKeys = useMemo(() => {
     return keysFromFlight({
       fr24Id: flight.fr24Id,
       icao24: flight.icao24 || detail?.aircraft?.hex || undefined,
-      callsign: flight.callsign || detail?.identification?.callsign || undefined,
+      callsign:
+        flight.callsign || detail?.identification?.callsign || undefined,
       flightNumber:
         flight.flightNumber ||
         detail?.identification?.number?.default ||
@@ -66,6 +69,34 @@ export function FlightDetailBody({
     keys.icao24 || keys.callsign || keys.flightNumber,
   );
 
+  const flightStartedAt = useMemo(
+    () => (detail ? parseFlightStartedAtMs(detail) : undefined),
+    [detail],
+  );
+
+  const sessionKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!keys.icao24 || flightStartedAt == null) return;
+    const key = `${keys.icao24}|${keys.fr24Id ?? ""}|${flightStartedAt}`;
+    if (sessionKeyRef.current === key) return;
+    sessionKeyRef.current = key;
+    void registerSession({
+      icao24: keys.icao24,
+      fr24Id: keys.fr24Id,
+      flightStartedAt,
+      callsign: keys.callsign,
+      flightNumber: keys.flightNumber,
+    });
+  }, [
+    flightStartedAt,
+    keys.callsign,
+    keys.flightNumber,
+    keys.fr24Id,
+    keys.icao24,
+    registerSession,
+  ]);
+
   const pullLiveAcars = useCallback(async () => {
     if (!canFetchAcars) return;
     setAcarsRefreshing(true);
@@ -77,19 +108,13 @@ export function FlightDetailBody({
         callsign: keys.callsign,
         flightNumber: keys.flightNumber,
         limit: 40,
+        flightStartedAt,
       });
       if (!result.ok) {
         setAcarsLiveError(result.error ?? "Live ACARS fetch failed");
         setAcarsLiveMeta(null);
       } else {
-        setAcarsLiveMeta(
-          result.count === 0
-            ? "No recent Airframes messages for this identity"
-            : `Airframes · ${result.count} hit${result.count === 1 ? "" : "s"}` +
-                (result.inserted
-                  ? ` · ${result.inserted} new`
-                  : " · already stored"),
-        );
+        setAcarsLiveMeta("");
       }
     } catch (err) {
       setAcarsLiveError(
@@ -105,6 +130,7 @@ export function FlightDetailBody({
     keys.flightNumber,
     keys.fr24Id,
     keys.icao24,
+    flightStartedAt,
     refreshAcars,
   ]);
 
@@ -149,23 +175,16 @@ export function FlightDetailBody({
             />
             <Row
               label="Registration"
-              value={detail?.aircraft?.registration || flight.registration || "—"}
+              value={
+                detail?.aircraft?.registration || flight.registration || "—"
+              }
             />
             <Row label="Airline" value={detail?.airline?.name || "—"} />
-            <Row label="Trail points" value={String(trailLen)} />
             {detail?.trail?.[detail.trail.length - 1] ? (
               <>
                 <Row
-                  label="Last alt"
-                  value={formatAltitude(
-                    detail.trail[detail.trail.length - 1]?.alt,
-                  )}
-                />
-                <Row
-                  label="Last fix"
-                  value={formatTimestamp(
-                    detail.trail[detail.trail.length - 1]?.ts,
-                  )}
+                  label="Altitude"
+                  value={formatAltitude(detail.trail[0]?.alt)}
                 />
               </>
             ) : null}
@@ -200,9 +219,6 @@ export function FlightDetailBody({
         {acarsLiveMeta ? (
           <Text style={styles.liveMeta}>{acarsLiveMeta}</Text>
         ) : null}
-        <Text style={styles.acarsHint}>
-          Tap a message for a the explanation.
-        </Text>
         {acars === undefined ||
         (acarsRefreshing && (acars?.length ?? 0) === 0) ? (
           <LoadingState label="Loading ACARS…" />
@@ -267,7 +283,7 @@ const styles = StyleSheet.create({
   },
   refreshBtnText: {
     ...typography.caption,
-    color: colors.accent,
+    color: colors.highlight,
     fontWeight: "600",
   },
   liveMeta: {

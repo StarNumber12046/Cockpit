@@ -140,15 +140,6 @@ export function AcarsMessageCard({ message }: Props) {
             {message.registration ? `${message.registration} · ` : ""}
             {formatTimestamp(message.timestamp)}
           </Text>
-          <Text style={styles.hint}>
-            {expanded
-              ? streaming
-                ? "Explaining…"
-                : "Tap to collapse"
-              : hasReady
-                ? "Tap to show AI"
-                : "Tap for AI explain"}
-          </Text>
         </View>
       </Pressable>
 
@@ -185,13 +176,7 @@ export function AcarsMessageCard({ message }: Props) {
               {status === "streaming" ? "▍" : ""}
             </Text>
           ) : streaming ? (
-            <Text style={styles.explainPlaceholder}>
-              Generating explanation on server…
-            </Text>
-          ) : null}
-
-          {hasReady && explanation?.model ? (
-            <Text style={styles.modelMeta}>{explanation.model}</Text>
+            <Text style={styles.explainPlaceholder}>Explaining...</Text>
           ) : null}
         </View>
       ) : null}
@@ -238,7 +223,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   badgeReady: {
-    borderColor: colors.accent,
+    borderWidth: 0,
   },
   badgeError: {
     borderColor: colors.danger,
@@ -247,7 +232,7 @@ const styles = StyleSheet.create({
   badgeText: {
     fontSize: 11,
     fontWeight: "700",
-    color: colors.accent,
+    color: colors.accentForeground,
   },
   cardTitle: {
     ...typography.subtitle,
@@ -273,7 +258,7 @@ const styles = StyleSheet.create({
   },
   hint: {
     ...typography.caption,
-    color: colors.accent,
+    color: "#ffffff",
     fontWeight: "600",
   },
   explainBox: {
@@ -299,7 +284,7 @@ const styles = StyleSheet.create({
   },
   regenerate: {
     ...typography.caption,
-    color: colors.accent,
+    color: colors.accentForeground,
     fontWeight: "600",
   },
   explainText: {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Dimensions,
@@ -11,7 +11,9 @@ import {
   Text,
   View,
 } from "react-native";
+import Svg, { Path } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useMutation, useQuery } from "convex/react";
 import type { Fr24Flight, Fr24FlightDetails } from "@cockpit/fr24";
 import {
   formatAltitude,
@@ -19,10 +21,16 @@ import {
   formatRoute,
   formatSpeed,
   isEmergencySquawk,
+  parseFlightStartedAtMs,
 } from "@cockpit/shared";
 import { colors, radius, spacing, typography } from "../constants/theme";
+import { api } from "../lib/convex";
 import { airlineLogoCandidates } from "../lib/media";
+import { lastMinuteSeries } from "../lib/trailMetrics";
+import { useFr24Detail } from "../hooks/useFr24Detail";
+import { FaIcon } from "./FaIcon";
 import { FlightDetailBody } from "./FlightDetailBody";
+import { MetricSparkline } from "./MetricSparkline";
 
 type Props = {
   flight: Fr24Flight | null;
@@ -32,6 +40,12 @@ type Props = {
   detailLoading?: boolean;
   detailError?: string | null;
   onRefreshDetail?: () => void;
+  /** When a flight is not on the live map, provide its fr24Id to fetch detail independently. */
+  offMapFlightId?: string;
+  offMapFlightNumber?: string;
+  offMapCallsign?: string;
+  /** Called when an off-map flight's coordinates become available so the map can fly to it. */
+  onOffMapLocationReady?: (lat: number, lng: number) => void;
 };
 
 const SWIPE_CLOSE_DISTANCE = 64;
@@ -92,8 +106,19 @@ export function FlightSheet({
   detailLoading = false,
   detailError = null,
   onRefreshDetail,
+  offMapFlightId,
+  offMapFlightNumber,
+  offMapCallsign,
+  onOffMapLocationReady,
 }: Props) {
   const insets = useSafeAreaInsets();
+
+  // When no live flight object but we have a fr24Id, fetch detail independently.
+  const offMap = useFr24Detail(!flight && offMapFlightId ? offMapFlightId : null);
+  const resolvedDetail = flight ? detail : offMap.detail;
+  const resolvedLoading = flight ? detailLoading : offMap.loading;
+  const resolvedError = flight ? detailError : offMap.error;
+  const resolvedRefresh = flight ? onRefreshDetail : offMap.refresh;
   const screenHeight = Dimensions.get("window").height;
   const expandedHeight = screenHeight - EXPANDED_TOP_OFFSET;
   const emergency = flight ? isEmergencySquawk(flight.squawk) : false;
@@ -120,35 +145,97 @@ export function FlightSheet({
 
   const [peekHeight, setPeekHeight] = useState(DEFAULT_PEEK_HEIGHT);
   const [expanded, setExpanded] = useState(false);
+  const [openGeneration, setOpenGeneration] = useState(0);
 
   // Keep last non-null flight so exit animation still has content.
   const lastFlight = useRef<Fr24Flight | null>(flight);
   if (flight) lastFlight.current = flight;
-  const display = flight ?? lastFlight.current;
+
+  // For off-map flights, build a skeleton Fr24Flight from detail data.
+  const offMapSkeleton = useMemo((): Fr24Flight | null => {
+    if (flight || !offMapFlightId || !resolvedDetail) return null;
+    const d = resolvedDetail;
+    const lastTrail = d.trail?.[d.trail.length - 1];
+    const origin =
+      d.airport?.origin?.code?.iata ?? d.airport?.origin?.code?.icao ?? "";
+    const dest =
+      d.airport?.destination?.code?.iata ??
+      d.airport?.destination?.code?.icao ??
+      "";
+    return {
+      fr24Id: offMapFlightId,
+      callsign: offMapCallsign || d.identification?.callsign || "",
+      flightNumber:
+        offMapFlightNumber || d.identification?.number?.default || "",
+      icao24: d.aircraft?.hex || "",
+      airlineIcao: d.airline?.code?.icao || "",
+      registration: d.aircraft?.registration || "",
+      aircraftCode: d.aircraft?.model?.code || "",
+      originAirportIata: origin,
+      destinationAirportIata: dest,
+      altitude: lastTrail?.alt ?? 0,
+      groundSpeed: lastTrail?.spd ?? 0,
+      verticalSpeed: 0,
+      heading: lastTrail?.hd ?? 0,
+      time: lastTrail?.ts ?? 0,
+      onGround: false,
+      squawk: "",
+      latitude: lastTrail?.lat ?? 0,
+      longitude: lastTrail?.lng ?? 0,
+    };
+  }, [flight, offMapFlightId, offMapCallsign, offMapFlightNumber, resolvedDetail]);
+
+  const display = flight ?? offMapSkeleton ?? lastFlight.current;
+
+  // Fly the map to the off-map flight's location when coordinates become available.
+  useEffect(() => {
+    if (!flight && offMapSkeleton && onOffMapLocationReady) {
+      const { latitude, longitude } = offMapSkeleton;
+      if (latitude && longitude) {
+        onOffMapLocationReady(latitude, longitude);
+      }
+    }
+  }, [flight, offMapSkeleton, onOffMapLocationReady]);
+
+  const syncExpandedState = (raw: number) => {
+    const value = Math.max(0, Math.min(1, raw));
+    expandRef.current = value;
+    const nextExpanded = value > 0.5;
+    setExpanded((prev) => (prev === nextExpanded ? prev : nextExpanded));
+  };
+
+  const applyExpandProgress = (raw: number) => {
+    const value = Math.max(0, Math.min(1, raw));
+    syncExpandedState(value);
+    expand.setValue(value);
+  };
 
   useEffect(() => {
     const id = expand.addListener(({ value }) => {
-      expandRef.current = value;
-      setExpanded(value > 0.5);
+      syncExpandedState(value);
     });
     return () => expand.removeListener(id);
   }, [expand]);
 
   useEffect(() => {
     if (visible) {
+      setOpenGeneration((g) => g + 1);
       dragY.setValue(0);
-      expand.setValue(0);
-      expandRef.current = 0;
-      setExpanded(false);
+      applyExpandProgress(0);
       scrollYRef.current = 0;
-      scrollRef.current?.scrollTo({ y: 0, animated: false });
       Animated.spring(progress, {
         toValue: 0,
         useNativeDriver: false,
         friction: 9,
         tension: 80,
-      }).start();
+      }).start(() => {
+        scrollRef.current?.scrollTo({ y: 0, animated: false });
+      });
     } else {
+      expand.stopAnimation();
+      applyExpandProgress(0);
+      scrollYRef.current = 0;
+      dragY.setValue(0);
       Animated.timing(progress, {
         toValue: 1,
         duration: 220,
@@ -163,8 +250,13 @@ export function FlightSheet({
     [display],
   );
 
+  const tracked = useQuery(api.tracked.list);
+  const addTracked = useMutation(api.tracked.add);
+  const removeTracked = useMutation(api.tracked.remove);
+
   const snapExpand = (toValue: 0 | 1) => {
     expandRef.current = toValue;
+    setExpanded(toValue === 1);
     Animated.spring(expand, {
       toValue,
       useNativeDriver: false,
@@ -205,31 +297,106 @@ export function FlightSheet({
       }),
     ]).start(() => {
       dragY.setValue(0);
-      expand.setValue(0);
-      expandRef.current = 0;
-      setExpanded(false);
+      applyExpandProgress(0);
       onCloseRef.current();
     });
   };
+
+  const label = display ? formatFlightLabel(display) : "";
+  const origin = display?.originAirportIata?.trim().toUpperCase() || "???";
+  const destination =
+    display?.destinationAirportIata?.trim().toUpperCase() || "???";
+  const airlineHint =
+    display?.airlineIcao?.trim().toUpperCase() ||
+    label.slice(0, 3).toUpperCase();
+  const logoUris = display
+    ? airlineLogoCandidates({
+        airlineIcao: display.airlineIcao,
+        flightNumber: display.flightNumber,
+        callsign: display.callsign,
+      })
+    : [];
+
+  const trackedEntry = useMemo(() => {
+    if (!tracked || !display) return null;
+    const flightNumber = (display.flightNumber || label)
+      .replace(/\s+/g, "")
+      .toUpperCase();
+    return (
+      tracked.find((row) => {
+        if (display.fr24Id && row.fr24Id) {
+          return row.fr24Id === display.fr24Id;
+        }
+        return row.flightNumber === flightNumber;
+      }) ?? null
+    );
+  }, [tracked, display, label]);
+
+  const isTracked = trackedEntry != null;
+
+  const onToggleTrack = useCallback(() => {
+    if (!display) return;
+    if (trackedEntry) {
+      void removeTracked({ id: trackedEntry._id });
+      return;
+    }
+    void addTracked({
+      fr24Id: display.fr24Id,
+      icao24: display.icao24 || undefined,
+      flightNumber: display.flightNumber || label,
+      callsign: display.callsign,
+      label,
+      flightStartedAt: resolvedDetail ? parseFlightStartedAtMs(resolvedDetail) : undefined,
+    });
+  }, [addTracked, resolvedDetail, display, label, removeTracked, trackedEntry]);
+
+  const speedSeries = useMemo(
+    () =>
+      display
+        ? lastMinuteSeries(
+            resolvedDetail?.trail,
+            {
+              alt: display.altitude,
+              spd: display.groundSpeed,
+              ts: display.time,
+            },
+            "spd",
+          )
+        : [0, 0],
+    [resolvedDetail?.trail, display],
+  );
+
+  const altitudeSeries = useMemo(
+    () =>
+      display
+        ? lastMinuteSeries(
+            resolvedDetail?.trail,
+            {
+              alt: display.altitude,
+              spd: display.groundSpeed,
+              ts: display.time,
+            },
+            "alt",
+          )
+        : [0, 0],
+    [resolvedDetail?.trail, display],
+  );
+
+  const speedValue =
+    display?.groundSpeed != null && Number.isFinite(display.groundSpeed)
+      ? String(Math.round(display.groundSpeed))
+      : "—";
+  const altitudeValue =
+    display?.altitude != null && Number.isFinite(display.altitude)
+      ? String(Math.round(display.altitude).toLocaleString())
+      : "—";
 
   const panResponder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_evt, g) => {
-          if (Math.abs(g.dy) <= 8 || Math.abs(g.dy) <= Math.abs(g.dx) * 1.2) {
-            return false;
-          }
-          // When expanded and scrolled, let ScrollView handle downward pans.
-          if (
-            expandRef.current > 0.5 &&
-            g.dy > 0 &&
-            scrollYRef.current > 4
-          ) {
-            return false;
-          }
-          return true;
-        },
+        onMoveShouldSetPanResponder: (_evt, g) =>
+          Math.abs(g.dy) > 8 && Math.abs(g.dy) > Math.abs(g.dx) * 1.2,
         onPanResponderMove: (_evt, g) => {
           const isExpanded = expandRef.current > 0.5;
           const peek = peekHeightRef.current;
@@ -240,7 +407,7 @@ export function FlightSheet({
             if (isExpanded) {
               // Dragging down from expanded: resist then allow collapse motion.
               const collapseDy = Math.min(g.dy, lift);
-              expand.setValue(Math.max(0, 1 - collapseDy / lift));
+              applyExpandProgress(Math.max(0, 1 - collapseDy / lift));
               dragY.setValue(0);
             } else {
               dragY.setValue(g.dy);
@@ -250,7 +417,7 @@ export function FlightSheet({
               dragY.setValue(g.dy * 0.2);
             } else {
               const expandDy = Math.min(-g.dy, lift);
-              expand.setValue(Math.min(1, expandDy / lift));
+              applyExpandProgress(Math.min(1, expandDy / lift));
               dragY.setValue(0);
             }
           }
@@ -302,21 +469,7 @@ export function FlightSheet({
     [dragY, expand, progress],
   );
 
-  if (!visible || !display) return null;
-
-  const label = formatFlightLabel(display);
-  const route = formatRoute(
-    display.originAirportIata,
-    display.destinationAirportIata,
-  );
-  const airlineHint =
-    display.airlineIcao?.trim().toUpperCase() ||
-    label.slice(0, 3).toUpperCase();
-  const logoUris = airlineLogoCandidates({
-    airlineIcao: display.airlineIcao,
-    flightNumber: display.flightNumber,
-    callsign: display.callsign,
-  });
+  if (!visible || (!display && !offMapFlightId)) return null;
 
   // Bottom-anchored sheet: grow height to expand upward. Do NOT also translateY —
   // that double-counts lift and shoots the sheet off the top of the screen.
@@ -345,9 +498,9 @@ export function FlightSheet({
             transform: [{ translateY: sheetTranslate }],
           },
         ]}
-        {...panResponder.panHandlers}
       >
         <View
+          {...panResponder.panHandlers}
           onLayout={(e) => {
             const peekContent = Math.ceil(e.nativeEvent.layout.height);
             const bottomPad = Math.max(insets.bottom, spacing.lg);
@@ -360,58 +513,90 @@ export function FlightSheet({
         >
           <View style={styles.handle} />
 
-          <Pressable
-            onPress={() => snapExpand(1)}
-            style={({ pressed }) => [
-              styles.body,
-              pressed ? styles.pressed : null,
-            ]}
-          >
+          {!display ? (
             <View style={styles.peekBlock}>
-              <View style={styles.topRow}>
-                <View style={styles.identity}>
-                  <AirlineBadge
-                    logoUris={logoUris}
-                    fallback={airlineHint.slice(0, 3)}
-                    emergency={emergency}
-                  />
-                  <View style={styles.idText}>
-                    <View style={styles.titleRow}>
-                      <Text style={styles.callsign} numberOfLines={1}>
-                        {label}
-                      </Text>
-                      {display.aircraftCode ? (
-                        <Text style={styles.acType}>{display.aircraftCode}</Text>
-                      ) : null}
-                    </View>
-                    <Text style={styles.route} numberOfLines={1}>
-                      {route}
+              <Text style={styles.loadingText}>Loading flight…</Text>
+            </View>
+          ) : (
+          <View style={styles.peekBlock}>
+            <View style={styles.topRow}>
+              <View style={styles.identity}>
+                <AirlineBadge
+                  logoUris={logoUris}
+                  fallback={airlineHint.slice(0, 3)}
+                  emergency={emergency}
+                />
+                <View style={styles.idText}>
+                  <View style={styles.titleRow}>
+                    <Text style={styles.callsign} numberOfLines={1}>
+                      {label}
                     </Text>
+                    {display.aircraftCode ? (
+                      <Text style={styles.acType} numberOfLines={1}>
+                        {display.aircraftCode}
+                      </Text>
+                    ) : null}
                   </View>
                 </View>
+              </View>
 
-                <View style={styles.metrics}>
+              <Pressable
+                onPress={onToggleTrack}
+                hitSlop={10}
+                style={({ pressed }) => [
+                  styles.trackBtn,
+                  pressed ? styles.pressed : null,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  isTracked ? "Untrack flight" : "Track flight"
+                }
+              >
+                <FaIcon
+                  name={isTracked ? "bell-slash" : "bell"}
+                  size={22}
+                  color={isTracked ? colors.highlight : colors.textMuted}
+                />
+              </Pressable>
+            </View>
+
+            <Pressable
+              onPress={() => snapExpand(1)}
+              style={({ pressed }) => [
+                styles.body,
+                pressed ? styles.pressed : null,
+              ]}
+            >
+              <View style={styles.routeRow}>
+                <View style={styles.routeCodes}>
+                  <Text style={styles.airportCode}>{origin}</Text>
+                  <RouteArrow />
+                  <Text style={styles.airportCode}>{destination}</Text>
                   {emergency && display.squawk ? (
                     <Text style={styles.squawkHot}>SQ {display.squawk}</Text>
-                  ) : (
-                    <Text style={styles.phase} numberOfLines={1}>
-                      {display.onGround
-                        ? "On ground"
-                        : display.verticalSpeed < -400
-                          ? "Descending"
-                          : display.verticalSpeed > 400
-                            ? "Climbing"
-                            : "En route"}
-                    </Text>
-                  )}
-                  <View style={styles.metricRow}>
-                    <Text style={styles.metric}>
-                      {formatSpeed(display.groundSpeed)}
-                    </Text>
-                    <Text style={styles.metricDot}>·</Text>
-                    <Text style={styles.metricAccent}>
-                      {formatAltitude(display.altitude)}
-                    </Text>
+                  ) : null}
+                </View>
+
+                <View style={styles.liveMetrics}>
+                  <View style={styles.metricGroup}>
+                    <MetricSparkline
+                      data={speedSeries}
+                      gradientId="speed-spark"
+                    />
+                    <View style={styles.metricText}>
+                      <Text style={styles.metricValue}>{speedValue}</Text>
+                      <Text style={styles.metricUnit}>kt</Text>
+                    </View>
+                  </View>
+                  <View style={styles.metricGroup}>
+                    <MetricSparkline
+                      data={altitudeSeries}
+                      gradientId="alt-spark"
+                    />
+                    <View style={styles.metricText}>
+                      <Text style={styles.metricValue}>{altitudeValue}</Text>
+                      <Text style={styles.metricUnit}>ft</Text>
+                    </View>
                   </View>
                 </View>
               </View>
@@ -420,21 +605,21 @@ export function FlightSheet({
                 <Text style={styles.nowLabel}>Now</Text>
                 <Text style={styles.narrative}>{narrative}</Text>
               </View>
-
-              <Text style={styles.hint}>
-                Swipe up for live detail & ACARS · swipe down to close
-              </Text>
-            </View>
-          </Pressable>
+            </Pressable>
+          </View>
+          )}
         </View>
 
+        {display ? (
         <ScrollView
+          key={`${display.fr24Id}-${openGeneration}`}
           ref={scrollRef}
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={expanded}
           scrollEnabled={expanded}
           bounces={expanded}
+          nestedScrollEnabled
           onScroll={(e) => {
             scrollYRef.current = e.nativeEvent.contentOffset.y;
           }}
@@ -443,12 +628,13 @@ export function FlightSheet({
         >
           <FlightDetailBody
             flight={display}
-            detail={detail}
-            detailLoading={detailLoading}
-            detailError={detailError ?? null}
-            onRefreshDetail={onRefreshDetail}
+            detail={resolvedDetail}
+            detailLoading={resolvedLoading}
+            detailError={resolvedError ?? null}
+            onRefreshDetail={resolvedRefresh}
           />
         </ScrollView>
+        ) : null}
       </Animated.View>
     </View>
   );
@@ -458,6 +644,21 @@ export function FlightSheet({
  * Airline logo badge. Tries multiple CDN URLs (gstatic → kiwi → avs → FR24)
  * because FR24 operator assets 403 Android's default okhttp User-Agent.
  */
+function RouteArrow() {
+  return (
+    <Svg width={16} height={16} viewBox="0 0 24 24">
+      <Path
+        d="M5 12h12M13 7l5 5-5 5"
+        stroke={colors.textDim}
+        strokeWidth={2}
+        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 function AirlineBadge({
   logoUris,
   fallback,
@@ -550,8 +751,7 @@ const styles = StyleSheet.create({
   },
   topRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: spacing.md,
   },
   identity: {
@@ -560,6 +760,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.md,
     minWidth: 0,
+  },
+  trackBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   badge: {
     width: 44,
@@ -590,59 +800,84 @@ const styles = StyleSheet.create({
   },
   idText: {
     flex: 1,
-    gap: 2,
+    justifyContent: "center",
     minWidth: 0,
+    height: 44,
   },
   titleRow: {
     flexDirection: "row",
-    alignItems: "baseline",
+    alignItems: "flex-end",
     gap: spacing.sm,
+    minWidth: 0,
+    height: 44,
   },
   callsign: {
     ...typography.subtitle,
-    fontSize: 18,
-    fontWeight: "700",
+    fontSize: 40,
+    fontWeight: 800,
+    lineHeight: 40,
+    flexShrink: 1,
   },
   acType: {
     ...typography.caption,
     color: colors.textDim,
     fontWeight: "600",
+    fontSize: 24,
+    lineHeight: 24,
+    flexShrink: 0,
+    paddingBottom: 2,
   },
-  route: {
-    ...typography.body,
-    color: colors.accent,
-    fontWeight: "600",
+  routeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
   },
-  metrics: {
-    alignItems: "flex-end",
-    gap: 4,
+  routeCodes: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + 2,
+    flexShrink: 1,
+    minWidth: 0,
   },
-  phase: {
-    ...typography.caption,
-    color: colors.textMuted,
-    fontWeight: "600",
+  airportCode: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: colors.highlight,
+    letterSpacing: 0.3,
   },
   squawkHot: {
     ...typography.caption,
     color: colors.danger,
     fontWeight: "800",
+    marginLeft: spacing.xs,
   },
-  metricRow: {
+  liveMetrics: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: spacing.md,
+    flexShrink: 0,
   },
-  metric: {
-    ...typography.mono,
-    color: colors.textMuted,
+  metricGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
   },
-  metricDot: {
-    color: colors.textDim,
+  metricText: {
+    alignItems: "flex-start",
   },
-  metricAccent: {
-    ...typography.mono,
-    color: colors.accent,
+  metricValue: {
+    fontSize: 18,
     fontWeight: "700",
+    color: colors.highlight,
+    fontVariant: ["tabular-nums"],
+    lineHeight: 20,
+  },
+  metricUnit: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.textDim,
+    lineHeight: 14,
   },
   narrativeBlock: {
     gap: 4,
@@ -667,5 +902,11 @@ const styles = StyleSheet.create({
     color: colors.textDim,
     textAlign: "center",
     marginTop: spacing.xs,
+  },
+  loadingText: {
+    ...typography.body,
+    color: colors.textMuted,
+    textAlign: "center",
+    paddingVertical: spacing.lg,
   },
 });

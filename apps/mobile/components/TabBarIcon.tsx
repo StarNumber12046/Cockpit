@@ -1,17 +1,13 @@
-import { Text, type TextStyle } from "react-native";
+import { FaIcon, type FaIconName } from "./FaIcon";
 import { colors } from "../constants/theme";
 
-/**
- * Text-based tab icons — no vector-font / Expo schema dependency.
- * Works even when `expo start --offline` can't resolve manifest assets.
- */
-const GLYPHS = {
-  live: "✈",
-  alerts: "⚠",
-  track: "◎",
-} as const;
+export type TabBarIconName = "live" | "alerts" | "track";
 
-export type TabBarIconName = keyof typeof GLYPHS;
+const ICONS: Record<TabBarIconName, FaIconName> = {
+  live: "map",
+  alerts: "exclamation-triangle",
+  track: "bell",
+};
 
 type Props = {
   name: TabBarIconName;
@@ -20,13 +16,7 @@ type Props = {
 };
 
 export function TabBarIcon({ name, focused, size = 20 }: Props) {
-  const style: TextStyle = {
-    fontSize: size,
-    color: focused ? colors.accent : colors.textDim,
-    fontWeight: focused ? "700" : "500",
-    textAlign: "center",
-    width: size + 8,
-    lineHeight: size + 4,
-  };
-  return <Text style={style}>{GLYPHS[name]}</Text>;
+  const color = focused ? colors.accent : colors.textDim;
+
+  return <FaIcon name={ICONS[name]} size={size} color={color} />;
 }

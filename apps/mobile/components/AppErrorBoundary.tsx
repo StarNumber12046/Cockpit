@@ -65,7 +65,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   btnText: {
-    color: colors.bg,
+    color: colors.accentForeground,
     fontWeight: "700",
   },
 });

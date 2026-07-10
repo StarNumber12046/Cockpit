@@ -8,6 +8,7 @@ import {
   searchMessages,
   type MappedAcarsMessage,
 } from "./lib/airframesClient";
+import { createAcarsAlertIfEligible } from "./lib/alertCreate";
 
 const mappedValidator = v.object({
   externalId: v.string(),
@@ -55,7 +56,9 @@ export const search = action({
         // Text-only windows; icao path omits timeframe in client.
         timeframe: args.text && !args.icao ? "last-day" : undefined,
       });
-      const messages = raw.map(mapAirframesMessage);
+      const messages = raw
+        .map(mapAirframesMessage)
+        .filter((m): m is MappedAcarsMessage => m != null);
 
       let inserted = 0;
       if (args.persist !== false && messages.length > 0) {
@@ -89,6 +92,8 @@ export const refreshForFlight = action({
     callsign: v.optional(v.string()),
     flightNumber: v.optional(v.string()),
     limit: v.optional(v.number()),
+    /** Epoch ms — only ACARS after this time can raise alerts. */
+    flightStartedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     if (!args.icao24 && !args.callsign && !args.flightNumber) {
@@ -97,6 +102,7 @@ export const refreshForFlight = action({
         error: "Provide icao24, callsign, or flightNumber",
         count: 0,
         inserted: 0,
+        alertsCreated: 0,
         messages: [] as MappedAcarsMessage[],
       };
     }
@@ -121,18 +127,22 @@ export const refreshForFlight = action({
       }));
 
       let inserted = 0;
+      let alertsCreated = 0;
       if (stamped.length > 0) {
         const result = await ctx.runMutation(internal.acarsLive.ingest, {
           messages: stamped,
           fr24Id: args.fr24Id,
+          flightStartedAt: args.flightStartedAt,
         });
         inserted = result.inserted;
+        alertsCreated = result.alertsCreated;
       }
 
       return {
         ok: true as const,
         count: stamped.length,
         inserted,
+        alertsCreated,
         messages: stamped,
       };
     } catch (err) {
@@ -146,10 +156,12 @@ export const ingest = internalMutation({
   args: {
     messages: v.array(mappedValidator),
     fr24Id: v.optional(v.string()),
+    flightStartedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     let inserted = 0;
     let skipped = 0;
+    let alertsCreated = 0;
 
     for (const msg of args.messages) {
       const existing = await ctx.db
@@ -178,9 +190,24 @@ export const ingest = internalMutation({
         label: msg.label,
       });
       inserted += 1;
+
+      const alertId = await createAcarsAlertIfEligible(ctx, {
+        icao24: msg.icao24,
+        fr24Id: args.fr24Id,
+        callsign: msg.callsign,
+        flightNumber: msg.flightNumber,
+        timestamp: msg.timestamp,
+        category: msg.category,
+        severity: msg.severity,
+        raw: msg.raw,
+        decoded: msg.decoded,
+        externalId: msg.externalId,
+        hintFlightStartedAt: args.flightStartedAt,
+      });
+      if (alertId) alertsCreated += 1;
     }
 
-    return { inserted, skipped };
+    return { inserted, skipped, alertsCreated };
   },
 });
 
@@ -205,6 +232,7 @@ function errorResult(err: unknown) {
       status: err.status,
       count: 0,
       inserted: 0,
+      alertsCreated: 0,
       messages: [] as MappedAcarsMessage[],
     };
   }
@@ -214,6 +242,7 @@ function errorResult(err: unknown) {
     error: message,
     count: 0,
     inserted: 0,
+    alertsCreated: 0,
     messages: [] as MappedAcarsMessage[],
   };
 }

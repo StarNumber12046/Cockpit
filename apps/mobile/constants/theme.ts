@@ -8,8 +8,11 @@ export const colors = {
   text: "#E8EEF9",
   textMuted: "#8B9BB8",
   textDim: "#5C6B86",
-  accent: "#3D8BFF",
-  accentSoft: "rgba(61, 139, 255, 0.15)",
+  accent: "#000000",
+  accentForeground: "#FFFFFF",
+  accentSoft: "rgba(0, 0, 0, 0.1)",
+  /** Readable emphasis on dark surfaces (replaces blue accent text). */
+  highlight: "#D6DCE8",
   success: "#3DDC97",
   warning: "#F5A623",
   danger: "#FF5C5C",
@@ -34,15 +37,23 @@ export const radius = {
   full: 999,
 } as const;
 
+const FONT = "RobotoFlex";
+
 export const typography = {
-  title: { fontSize: 22, fontWeight: "700" as const, color: colors.text },
-  subtitle: { fontSize: 16, fontWeight: "600" as const, color: colors.text },
-  body: { fontSize: 14, fontWeight: "400" as const, color: colors.text },
-  caption: { fontSize: 12, fontWeight: "400" as const, color: colors.textMuted },
+  title: { fontFamily: FONT, fontSize: 22, fontWeight: "700" as const, color: colors.text },
+  subtitle: { fontFamily: FONT, fontSize: 16, fontWeight: "600" as const, color: colors.text },
+  body: { fontFamily: FONT, fontSize: 14, fontWeight: "400" as const, color: colors.text },
+  caption: {
+    fontFamily: FONT,
+    fontSize: 12,
+    fontWeight: "400" as const,
+    color: colors.textMuted,
+  },
   mono: {
+    fontFamily: FONT,
     fontSize: 13,
     fontWeight: "500" as const,
     color: colors.text,
-    fontVariant: ["tabular-nums"] as ("tabular-nums")[],
+    fontVariant: ["tabular-nums"] as "tabular-nums"[],
   },
 };

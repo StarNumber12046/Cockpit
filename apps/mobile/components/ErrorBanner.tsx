@@ -43,7 +43,7 @@ const styles = StyleSheet.create({
   },
   btnText: {
     ...typography.caption,
-    color: colors.accent,
+    color: colors.highlight,
     fontWeight: "600",
   },
 });

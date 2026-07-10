@@ -8,7 +8,7 @@ type Props = {
 export function LoadingState({ label = "Loading…" }: Props) {
   return (
     <View style={styles.wrap}>
-      <ActivityIndicator color={colors.accent} size="large" />
+      <ActivityIndicator color={colors.accentForeground} size="large" />
       <Text style={styles.label}>{label}</Text>
     </View>
   );

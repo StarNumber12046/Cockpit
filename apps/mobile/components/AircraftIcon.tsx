@@ -1,9 +1,6 @@
 import { memo } from "react";
 import Svg, { G, Path } from "react-native-svg";
-import {
-  resolveAircraftIcon,
-  type AircraftShape,
-} from "../lib/aircraftIcons";
+import { resolveAircraftIcon, type AircraftShape } from "../lib/aircraftIcons";
 
 type Props = {
   /** ICAO type designator from FR24 feed (B738, A320, …). */
@@ -26,7 +23,7 @@ function AircraftIconInner({
   const { shape, scale } = resolveAircraftIcon(aircraftCode);
   const dim = Math.round(size * scale);
   // Paths use large viewBox units (e.g. 0–380); strokeScale matches tar1090.
-  const stroke = 2 * 0.75 * (shape.strokeScale ?? 1);
+  // const stroke = 2 * 0.75 * (shape.strokeScale ?? 1);
 
   return (
     <Svg
@@ -41,8 +38,7 @@ function AircraftIconInner({
             key={i}
             d={d}
             fill={color}
-            stroke="#0B1220"
-            strokeWidth={stroke}
+            strokeWidth={0}
             strokeLinejoin="round"
             strokeLinecap="round"
           />

@@ -1,8 +1,11 @@
 import { useEffect } from "react";
 import { Stack } from "expo-router";
+import { useFonts } from "expo-font";
 import { StatusBar } from "expo-status-bar";
 import { ConvexProvider, ConvexReactClient } from "convex/react";
 import { Text, View } from "react-native";
+import { FontAwesomeFont } from "../lib/vectorIcons";
+import RoboFlex from "../assets/fonts/RobotoFlex.ttf";
 import { colors } from "../constants/theme";
 import { CONVEX_URL } from "../constants/config";
 import { AppErrorBoundary } from "../components/AppErrorBoundary";
@@ -14,10 +17,19 @@ const convex = hasConvexUrl
   : null;
 
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    FontAwesome: FontAwesomeFont,
+    RobotoFlex: RoboFlex,
+  });
+
   useEffect(() => {
     // Confirms JS is running after Metro prints "Android Bundled".
     console.log("[cockpit] root layout mounted");
   }, []);
+
+  if (!fontsLoaded) {
+    return null;
+  }
 
   if (!convex) {
     return (
@@ -59,10 +71,6 @@ export default function RootLayout() {
           }}
         >
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="flight/[id]"
-            options={{ title: "Flight", presentation: "card" }}
-          />
         </Stack>
       </ConvexProvider>
     </AppErrorBoundary>

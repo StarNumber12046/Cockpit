@@ -1,30 +1,30 @@
 import { useMemo } from "react";
-import {
-  FlatList,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { useQuery } from "convex/react";
 import { isEmergencySquawk } from "@cockpit/shared";
-import { api } from "../../lib/convex";
-import { useFr24Flights } from "../../hooks/useFr24Flights";
-import { SeverityChip } from "../../components/SeverityChip";
-import { LoadingState } from "../../components/LoadingState";
-import { EmptyState } from "../../components/EmptyState";
-import { colors, radius, spacing, typography } from "../../constants/theme";
+import type { Fr24Flight } from "@cockpit/fr24";
+import { api } from "../lib/convex";
+import { SeverityChip } from "./SeverityChip";
+import { LoadingState } from "./LoadingState";
+import { EmptyState } from "./EmptyState";
+import { colors, radius, spacing, typography } from "../constants/theme";
 
-export default function AlertsScreen() {
+type Props = {
+  flights?: Fr24Flight[];
+};
+
+export function AlertsPanel({ flights = [] }: Props) {
   const alerts = useQuery(api.alerts.list, { limit: 50 });
-  const { flights } = useFr24Flights({ pollMs: 30_000 });
 
   const liveSquawks = useMemo(
     () =>
-      flights.filter((f) => isEmergencySquawk(f.squawk)).map((f) => ({
-        id: f.fr24Id,
-        callsign: f.callsign || f.flightNumber || f.fr24Id,
-        squawk: f.squawk,
-      })),
+      flights
+        .filter((f) => isEmergencySquawk(f.squawk))
+        .map((f) => ({
+          id: f.fr24Id,
+          callsign: f.callsign || f.flightNumber || f.fr24Id,
+          squawk: f.squawk,
+        })),
     [flights],
   );
 
@@ -33,7 +33,7 @@ export default function AlertsScreen() {
   }
 
   return (
-    <View style={styles.screen}>
+    <View style={styles.root}>
       {liveSquawks.length > 0 ? (
         <View style={styles.chipRow}>
           <Text style={styles.section}>Live emergency squawks</Text>
@@ -49,21 +49,15 @@ export default function AlertsScreen() {
         </View>
       ) : null}
 
-      <FlatList
-        data={alerts}
-        keyExtractor={(item) => item._id}
-        contentContainerStyle={styles.list}
-        ListEmptyComponent={
-          <EmptyState
-            title="No alerts"
-            message="Run seed.populate in Convex for demo alerts, or wait for correlated events."
-          />
-        }
-        ListHeaderComponent={
-          <Text style={[styles.section, styles.listHeader]}>Convex alerts</Text>
-        }
-        renderItem={({ item }) => (
-          <View style={styles.card}>
+      <Text style={styles.section}>Convex alerts</Text>
+      {alerts.length === 0 ? (
+        <EmptyState
+          title="No alerts"
+          message="Emergency squawks and ACARS from tracked flights appear here automatically."
+        />
+      ) : (
+        alerts.map((item) => (
+          <View key={item._id} style={styles.card}>
             <View style={styles.cardTop}>
               <Text style={styles.title} numberOfLines={2}>
                 {item.title}
@@ -79,23 +73,15 @@ export default function AlertsScreen() {
               {new Date(item.createdAt).toLocaleString()}
             </Text>
           </View>
-        )}
-      />
+        ))
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.bg,
-  },
-  list: {
-    paddingBottom: spacing.xxl,
-  },
-  listHeader: {
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
+  root: {
+    gap: spacing.sm,
   },
   section: {
     ...typography.caption,
@@ -104,15 +90,13 @@ const styles = StyleSheet.create({
     color: colors.textDim,
   },
   chipRow: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
     gap: spacing.sm,
+    marginBottom: spacing.xs,
   },
   chips: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,
-    marginBottom: spacing.sm,
   },
   squawkChip: {
     backgroundColor: colors.dangerSoft,
@@ -133,8 +117,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     padding: spacing.md,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
     gap: spacing.sm,
   },
   cardTop: {

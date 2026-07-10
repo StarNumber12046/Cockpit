@@ -1,5 +1,6 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
+import { normalizeHex } from "./lib/flightSession";
 
 /** List tracked flights (anonymous v1 — no auth). */
 export const list = query({
@@ -16,9 +17,11 @@ export const list = query({
 export const add = mutation({
   args: {
     fr24Id: v.optional(v.string()),
+    icao24: v.optional(v.string()),
     flightNumber: v.string(),
     callsign: v.optional(v.string()),
     label: v.optional(v.string()),
+    flightStartedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const flightNumber = args.flightNumber.replace(/\s+/g, "").toUpperCase();
@@ -42,11 +45,25 @@ export const add = mutation({
 
     return await ctx.db.insert("trackedFlights", {
       fr24Id: args.fr24Id,
+      icao24: normalizeHex(args.icao24),
       flightNumber,
       callsign: args.callsign?.replace(/\s+/g, "").toUpperCase(),
       label: args.label,
+      flightStartedAt: args.flightStartedAt,
       createdAt: Date.now(),
     });
+  },
+});
+
+/** Cron: poll ACARS for tracked flights (newest first, capped). */
+export const listForPoll = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db
+      .query("trackedFlights")
+      .withIndex("by_createdAt")
+      .order("desc")
+      .take(50);
   },
 });
 

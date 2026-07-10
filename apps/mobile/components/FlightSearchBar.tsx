@@ -7,6 +7,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { FaIcon } from "./FaIcon";
 import { colors, radius, spacing, typography } from "../constants/theme";
 
 type Props = {
@@ -22,23 +23,23 @@ export function FlightSearchBar({
 }: Props) {
   return (
     <View style={styles.field}>
+      <View style={styles.iconSlot}>
+        {loading ? (
+          <ActivityIndicator color={colors.accent} size="small" />
+        ) : (
+          <FaIcon name="search" size={16} color={colors.text} />
+        )}
+      </View>
       <TextInput
         value={query}
         onChangeText={onChangeQuery}
-        placeholder="Search FR24 or enter flight #"
+        placeholder="Search flights, airports"
         placeholderTextColor={colors.textDim}
         style={styles.input}
         autoCapitalize="characters"
         autoCorrect={false}
         returnKeyType="search"
       />
-      <View style={styles.iconSlot}>
-        {loading ? (
-          <ActivityIndicator color={colors.accent} size="small" />
-        ) : (
-          <Text style={styles.searchIcon}>⌕</Text>
-        )}
-      </View>
     </View>
   );
 }
@@ -91,11 +92,7 @@ export function FlightSearchResults({
               {item.detail ?? item.type}
             </Text>
             <Text style={styles.hitAction}>
-              {busy
-                ? "…"
-                : actionLabel
-                  ? actionLabel(item)
-                  : "Track"}
+              {busy ? "…" : actionLabel ? actionLabel(item) : "Track"}
             </Text>
           </Pressable>
         );
@@ -125,19 +122,14 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: spacing.sm + 2,
     color: colors.text,
-    fontSize: 15,
+    fontSize: 16,
+    fontWeight: 500,
   },
   iconSlot: {
     width: 36,
     height: 36,
     alignItems: "center",
     justifyContent: "center",
-  },
-  searchIcon: {
-    color: colors.accent,
-    fontSize: 20,
-    fontWeight: "700",
-    marginTop: -1,
   },
   results: {
     maxHeight: 220,
@@ -175,7 +167,7 @@ const styles = StyleSheet.create({
   },
   hitAction: {
     ...typography.caption,
-    color: colors.accent,
+    color: colors.highlight,
     marginTop: 4,
     fontWeight: "600",
   },

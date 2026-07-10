@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useQuery } from "convex/react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { api } from "../../lib/convex";
 import {
   getBoundsFromRegion,
   type BoundsString,
@@ -9,9 +10,14 @@ import {
 } from "@cockpit/fr24";
 import { useFr24Detail } from "../../hooks/useFr24Detail";
 import { useFr24Flights } from "../../hooks/useFr24Flights";
+import { useSquawkReporter } from "../../hooks/useSquawkReporter";
 import { useFr24Search } from "../../hooks/useFr24Search";
-import { FlightMap, type MapRegion } from "../../components/FlightMap";
+import { FlightMap, type FlightMapHandle, type MapRegion } from "../../components/FlightMap";
 import { FlightSheet } from "../../components/FlightSheet";
+import { ChromeSheet } from "../../components/ChromeSheet";
+import { AlertsPanel } from "../../components/AlertsPanel";
+import { TrackedPanel } from "../../components/TrackedPanel";
+import { MapChromeActions } from "../../components/MapChromeActions";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import {
   FlightSearchBar,
@@ -49,12 +55,16 @@ function regionToBounds(region: MapRegion): BoundsString {
 }
 
 export default function HomeScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { results, loading: searchLoading, error: searchError, search, clear } =
     useFr24Search();
   const [query, setQuery] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [trackedOpen, setTrackedOpen] = useState(false);
+  const mapRef = useRef<FlightMapHandle>(null);
+  const alerts = useQuery(api.alerts.list, { limit: 50 });
+  const tracked = useQuery(api.tracked.list);
   /** null until the map publishes its startup region (user location or hub). */
   const [bounds, setBounds] = useState<BoundsString | null>(null);
   const lastRegionRef = useRef<MapRegion | null>(null);
@@ -102,7 +112,11 @@ export default function HomeScreen() {
       bounds: bounds ?? undefined,
       enabled: bounds != null,
     });
+  useSquawkReporter(flights, bounds != null);
   const [selected, setSelected] = useState<Fr24Flight | null>(null);
+  const [offMapFlightId, setOffMapFlightId] = useState<string | null>(null);
+  const [offMapFlightNumber, setOffMapFlightNumber] = useState<string>("");
+  const [offMapCallsign, setOffMapCallsign] = useState<string>("");
 
   useEffect(() => {
     console.log(
@@ -123,6 +137,8 @@ export default function HomeScreen() {
     const onMap = flights.find((f) => f.fr24Id === fr24Id);
     if (onMap) {
       setSelected(onMap);
+      setOffMapFlightId(null);
+      mapRef.current?.flyTo(onMap.latitude, onMap.longitude);
       setQuery("");
       clear();
       setBusyId(null);
@@ -131,14 +147,9 @@ export default function HomeScreen() {
     setQuery("");
     clear();
     setBusyId(null);
-    router.push({
-      pathname: "/flight/[id]",
-      params: {
-        id: fr24Id,
-        flightNumber: item.label.replace(/\s+/g, "").toUpperCase(),
-        callsign: item.label.replace(/\s+/g, "").toUpperCase(),
-      },
-    });
+    setOffMapFlightId(fr24Id);
+    setOffMapFlightNumber(item.label.replace(/\s+/g, "").toUpperCase());
+    setOffMapCallsign(item.label.replace(/\s+/g, "").toUpperCase());
   };
 
   // Keep sheet in sync if the selected flight moves on poll refresh.
@@ -166,14 +177,46 @@ export default function HomeScreen() {
   }, [selectedDetail?.trail, selectedLive]);
 
   const liveHits = results.live;
+  const alertCount = alerts?.length ?? 0;
+  const trackedCount = tracked?.length ?? 0;
+
+  const openAlerts = () => {
+    setTrackedOpen(false);
+    setAlertsOpen(true);
+  };
+
+  const openTracked = () => {
+    setAlertsOpen(false);
+    setTrackedOpen(true);
+  };
+
+  const onOpenTrackedFlight = (item: {
+    fr24Id?: string;
+    callsign?: string;
+    flightNumber: string;
+  }) => {
+    if (!item.fr24Id) return;
+    setTrackedOpen(false);
+    const onMap = flights.find((f) => f.fr24Id === item.fr24Id);
+    if (onMap) {
+      setSelected(onMap);
+      setOffMapFlightId(null);
+      mapRef.current?.flyTo(onMap.latitude, onMap.longitude);
+      return;
+    }
+    setOffMapFlightId(item.fr24Id);
+    setOffMapFlightNumber(item.flightNumber);
+    setOffMapCallsign(item.callsign ?? "");
+  };
 
   return (
     <View style={styles.screen}>
       <FlightMap
+        ref={mapRef}
         flights={flights}
         selectedId={selectedLive?.fr24Id}
         trail={selectedTrail}
-        onSelectFlight={setSelected}
+        onSelectFlight={(f) => { setSelected(f); setOffMapFlightId(null); }}
         onRegionChange={onRegionChange}
       />
 
@@ -185,6 +228,14 @@ export default function HomeScreen() {
           query={query}
           onChangeQuery={setQuery}
           loading={searchLoading}
+        />
+
+        <MapChromeActions
+          onAlerts={openAlerts}
+          onTracked={openTracked}
+          onRecenter={() => mapRef.current?.recenterOnUser()}
+          alertCount={alertCount}
+          trackedCount={trackedCount}
         />
 
         {searchError ? (
@@ -220,13 +271,33 @@ export default function HomeScreen() {
 
       <FlightSheet
         flight={selectedLive}
-        visible={selectedLive != null}
-        onClose={() => setSelected(null)}
+        visible={selectedLive != null || offMapFlightId != null}
+        onClose={() => { setSelected(null); setOffMapFlightId(null); }}
         detail={selectedDetail}
         detailLoading={detailLoading}
         detailError={detailError}
         onRefreshDetail={() => void refreshDetail()}
+        offMapFlightId={offMapFlightId ?? undefined}
+        offMapFlightNumber={offMapFlightNumber}
+        offMapCallsign={offMapCallsign}
+        onOffMapLocationReady={(lat, lng) => mapRef.current?.flyTo(lat, lng)}
       />
+
+      <ChromeSheet
+        visible={alertsOpen}
+        title="Alerts"
+        onClose={() => setAlertsOpen(false)}
+      >
+        <AlertsPanel flights={flights} />
+      </ChromeSheet>
+
+      <ChromeSheet
+        visible={trackedOpen}
+        title="Tracked flights"
+        onClose={() => setTrackedOpen(false)}
+      >
+        <TrackedPanel onOpenFlight={onOpenTrackedFlight} />
+      </ChromeSheet>
     </View>
   );
 }

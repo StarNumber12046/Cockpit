@@ -19,6 +19,7 @@
     "clean": "rimraf .turbo"
   },
   "dependencies": {
+    "@cockpit/shared": "workspace:*",
     "@ai-sdk/groq": "^4.0.6",
     "@types/node": "^26.1.1",
     "ai": "^7.0.18",

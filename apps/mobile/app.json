@@ -48,6 +48,15 @@
         {
           "locationWhenInUsePermission": "Cockpit shows your position on the live map."
         }
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "node_modules/react-native-vector-icons/Fonts/FontAwesome.ttf",
+            "./assets/fonts/RobotoFlex.ttf"
+          ]
+        }
       ]
     ],
     "experiments": {

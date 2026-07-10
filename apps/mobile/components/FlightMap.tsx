@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   InteractionManager,
   Platform,
@@ -23,6 +31,11 @@ import { AircraftTrail } from "./AircraftTrail";
 import { BADGE_ABOVE_PLANE, CallsignBadge } from "./CallsignBadge";
 
 export type MapRegion = Region;
+
+export type FlightMapHandle = {
+  recenterOnUser: () => void;
+  flyTo: (latitude: number, longitude: number) => void;
+};
 
 /** iOS-style user location blue (web overlay). */
 const USER_BLUE = "#007AFF";
@@ -54,9 +67,9 @@ const MARKER_RAMP_MS = 80;
 /**
  * Hide callsign badges when zoomed out past this latitude span (degrees).
  * Default hub view is ~1.6°; labels stay on at metro scale and drop for
- * regional / country views where they would crowd the map.
+ * regional views where they would crowd the map.
  */
-const CALLSIGN_MAX_LAT_DELTA = 2.0;
+const CALLSIGN_MAX_LAT_DELTA = 3.5;
 
 function callsignsVisibleAtZoom(region: Region): boolean {
   return region.latitudeDelta <= CALLSIGN_MAX_LAT_DELTA;
@@ -106,16 +119,14 @@ function projectToScreen(
  *  - Callsign badges = absolute RN overlay projected from region
  *    (Text/Image work normally — no Marker bitmap clipping)
  */
-export function FlightMap({
-  flights,
-  selectedId,
-  trail,
-  onSelectFlight,
-  onRegionChange,
-}: Props) {
+export const FlightMap = forwardRef<FlightMapHandle, Props>(function FlightMap(
+  { flights, selectedId, trail, onSelectFlight, onRegionChange },
+  ref,
+) {
   if (Platform.OS === "web") {
     return (
       <WebFlightMap
+        ref={ref}
         flights={flights}
         selectedId={selectedId}
         trail={trail}
@@ -127,6 +138,7 @@ export function FlightMap({
 
   return (
     <NativeFlightMap
+      ref={ref}
       flights={flights}
       selectedId={selectedId}
       trail={trail}
@@ -134,7 +146,7 @@ export function FlightMap({
       onRegionChange={onRegionChange}
     />
   );
-}
+});
 
 /**
  * Resolve startup camera: prefer user fix, else hub after timeout / deny / error.
@@ -170,261 +182,309 @@ function useBootRegion(
   return bootRegion;
 }
 
-function NativeFlightMap({
-  flights,
-  selectedId,
-  trail,
-  onSelectFlight,
-  onRegionChange,
-}: Props) {
-  const mapRef = useRef<MapView>(null);
-  const onRegionChangeRef = useRef(onRegionChange);
-  onRegionChangeRef.current = onRegionChange;
-  const {
-    permitted: userLocationPermitted,
-    coords,
-    status,
-  } = useUserLocation(true);
-  const bootRegion = useBootRegion(coords, status);
-  const [mapReady, setMapReady] = useState(false);
-  const [markersEnabled, setMarkersEnabled] = useState(false);
-  /** Progressive cap so Android does not snapshot every marker at once. */
-  const [markerCap, setMarkerCap] = useState(
-    Platform.OS === "android" ? MARKER_RAMP_STEP : MAX_MARKERS,
-  );
-  /** Live camera region — drives badge overlay projection. */
-  const [region, setRegion] = useState<Region | null>(null);
-  const [mapSize, setMapSize] = useState({ w: 0, h: 0 });
-  /** Hide overlay labels while the camera is moving — avoids snappy lag vs tiles. */
-  const [cameraMoving, setCameraMoving] = useState(false);
-  const regionRef = useRef<Region | null>(null);
-  const regionRafRef = useRef<number | null>(null);
-  const moveEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Smooth poll snaps so planes/badges glide instead of teleporting.
-  const smoothed = useSmoothedFlights(flights);
-
-  useEffect(() => {
-    if (bootRegion && !region) {
-      setRegion(bootRegion);
-      regionRef.current = bootRegion;
-    }
-  }, [bootRegion, region]);
-
-  useEffect(() => {
-    if (!mapReady) return;
-    const task = InteractionManager.runAfterInteractions(() => {
-      requestAnimationFrame(() => setMarkersEnabled(true));
-    });
-    return () => task.cancel();
-  }, [mapReady]);
-
-  // Stagger Android marker mounts to avoid a simultaneous bitmap-snapshot spike.
-  useEffect(() => {
-    if (!markersEnabled || Platform.OS !== "android") return;
-    if (markerCap >= MAX_MARKERS) return;
-    const t = setTimeout(() => {
-      setMarkerCap((n) => Math.min(MAX_MARKERS, n + MARKER_RAMP_STEP));
-    }, MARKER_RAMP_MS);
-    return () => clearTimeout(t);
-  }, [markersEnabled, markerCap]);
-
-  useEffect(() => {
-    if (!bootRegion) return;
-    onRegionChangeRef.current?.(bootRegion);
-  }, [bootRegion]);
-
-  useEffect(() => {
-    return () => {
-      if (regionRafRef.current != null) {
-        cancelAnimationFrame(regionRafRef.current);
-      }
-      if (moveEndTimerRef.current) clearTimeout(moveEndTimerRef.current);
-    };
-  }, []);
-
-  const visibleFlights = useMemo(() => {
-    if (!markersEnabled) return [];
-    const valid = smoothed.filter((f) =>
-      isValidMapCoordinate(f.latitude, f.longitude),
+const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
+  function NativeFlightMap(
+    { flights, selectedId, trail, onSelectFlight, onRegionChange },
+    ref,
+  ) {
+    const mapRef = useRef<MapView>(null);
+    const onRegionChangeRef = useRef(onRegionChange);
+    onRegionChangeRef.current = onRegionChange;
+    const {
+      permitted: userLocationPermitted,
+      coords,
+      status,
+    } = useUserLocation(true);
+    const bootRegion = useBootRegion(coords, status);
+    const [mapReady, setMapReady] = useState(false);
+    const [markersEnabled, setMarkersEnabled] = useState(false);
+    /** Progressive cap so Android does not snapshot every marker at once. */
+    const [markerCap, setMarkerCap] = useState(
+      Platform.OS === "android" ? MARKER_RAMP_STEP : MAX_MARKERS,
     );
-    const cap = Math.min(MAX_MARKERS, markerCap);
-    if (valid.length <= cap) return valid;
-    const selected = selectedId
-      ? valid.find((f) => f.fr24Id === selectedId)
-      : undefined;
-    const rest = valid
-      .filter((f) => f.fr24Id !== selectedId)
-      .slice(0, cap - (selected ? 1 : 0));
-    return selected ? [selected, ...rest] : rest;
-  }, [smoothed, markersEnabled, selectedId, markerCap]);
+    /** Live camera region — drives badge overlay projection. */
+    const [region, setRegion] = useState<Region | null>(null);
+    const [mapSize, setMapSize] = useState({ w: 0, h: 0 });
+    /** Hide overlay labels while the camera is moving — avoids snappy lag vs tiles. */
+    const [cameraMoving, setCameraMoving] = useState(false);
+    const regionRef = useRef<Region | null>(null);
+    const regionRafRef = useRef<number | null>(null);
+    const moveEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const onMapLayout = (e: LayoutChangeEvent) => {
-    const { width, height } = e.nativeEvent.layout;
-    setMapSize({ w: width, h: height });
-  };
+    // Smooth poll snaps so planes/badges glide instead of teleporting.
+    const smoothed = useSmoothedFlights(flights);
 
-  /** Coalesce camera events to one React update per frame. */
-  const scheduleRegionPaint = (next: Region) => {
-    regionRef.current = next;
-    if (regionRafRef.current != null) return;
-    regionRafRef.current = requestAnimationFrame(() => {
-      regionRafRef.current = null;
-      if (regionRef.current) setRegion(regionRef.current);
-    });
-  };
+    useEffect(() => {
+      if (bootRegion && !region) {
+        setRegion(bootRegion);
+        regionRef.current = bootRegion;
+      }
+    }, [bootRegion, region]);
 
-  if (!bootRegion) {
-    return (
-      <View style={styles.map}>
-        <View style={styles.mapBoot}>
-          <Text style={styles.mapBootText}>Finding your location…</Text>
+    useEffect(() => {
+      if (!mapReady) return;
+      const task = InteractionManager.runAfterInteractions(() => {
+        requestAnimationFrame(() => setMarkersEnabled(true));
+      });
+      return () => task.cancel();
+    }, [mapReady]);
+
+    // Stagger Android marker mounts to avoid a simultaneous bitmap-snapshot spike.
+    useEffect(() => {
+      if (!markersEnabled || Platform.OS !== "android") return;
+      if (markerCap >= MAX_MARKERS) return;
+      const t = setTimeout(() => {
+        setMarkerCap((n) => Math.min(MAX_MARKERS, n + MARKER_RAMP_STEP));
+      }, MARKER_RAMP_MS);
+      return () => clearTimeout(t);
+    }, [markersEnabled, markerCap]);
+
+    useEffect(() => {
+      if (!bootRegion) return;
+      onRegionChangeRef.current?.(bootRegion);
+    }, [bootRegion]);
+
+    useEffect(() => {
+      return () => {
+        if (regionRafRef.current != null) {
+          cancelAnimationFrame(regionRafRef.current);
+        }
+        if (moveEndTimerRef.current) clearTimeout(moveEndTimerRef.current);
+      };
+    }, []);
+
+    const visibleFlights = useMemo(() => {
+      if (!markersEnabled) return [];
+      const valid = smoothed.filter((f) =>
+        isValidMapCoordinate(f.latitude, f.longitude),
+      );
+      const cap = Math.min(MAX_MARKERS, markerCap);
+      if (valid.length <= cap) return valid;
+      const selected = selectedId
+        ? valid.find((f) => f.fr24Id === selectedId)
+        : undefined;
+      const rest = valid
+        .filter((f) => f.fr24Id !== selectedId)
+        .slice(0, cap - (selected ? 1 : 0));
+      return selected ? [selected, ...rest] : rest;
+    }, [smoothed, markersEnabled, selectedId, markerCap]);
+
+    const onMapLayout = (e: LayoutChangeEvent) => {
+      const { width, height } = e.nativeEvent.layout;
+      setMapSize({ w: width, h: height });
+    };
+
+    /** Coalesce camera events to one React update per frame. */
+    const scheduleRegionPaint = (next: Region) => {
+      regionRef.current = next;
+      if (regionRafRef.current != null) return;
+      regionRafRef.current = requestAnimationFrame(() => {
+        regionRafRef.current = null;
+        if (regionRef.current) setRegion(regionRef.current);
+      });
+    };
+
+    const recenterOnUser = useCallback(() => {
+      const latitude = coords?.latitude ?? HUB.latitude;
+      const longitude = coords?.longitude ?? HUB.longitude;
+      const next = regionAround(latitude, longitude, HUB.radiusMeters);
+      mapRef.current?.animateToRegion(next, 450);
+      regionRef.current = next;
+      setRegion(next);
+      onRegionChangeRef.current?.(next);
+    }, [coords]);
+
+    const flyTo = useCallback((latitude: number, longitude: number) => {
+      const next = regionAround(latitude, longitude, HUB.radiusMeters);
+      mapRef.current?.animateToRegion(next, 450);
+      regionRef.current = next;
+      setRegion(next);
+      onRegionChangeRef.current?.(next);
+    }, []);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        recenterOnUser,
+        flyTo,
+      }),
+      [recenterOnUser, flyTo],
+    );
+
+    if (!bootRegion) {
+      return (
+        <View style={styles.map}>
+          <View style={styles.mapBoot}>
+            <Text style={styles.mapBootText}>Finding your location…</Text>
+          </View>
         </View>
+      );
+    }
+
+    const activeRegion = region ?? bootRegion;
+    const zoomAllowsCallsigns = callsignsVisibleAtZoom(activeRegion);
+    const showBadgeLayer = markersEnabled && mapSize.w > 0 && !cameraMoving;
+
+    return (
+      <View style={styles.map} onLayout={onMapLayout}>
+        <MapView
+          ref={mapRef}
+          style={StyleSheet.absoluteFill}
+          provider={PROVIDER_DEFAULT}
+          initialRegion={bootRegion}
+          customMapStyle={DARK_MAP_STYLE}
+          userInterfaceStyle="dark"
+          mapType="standard"
+          showsUserLocation={userLocationPermitted}
+          showsMyLocationButton={false}
+          showsCompass={false}
+          showsScale={false}
+          showsTraffic={false}
+          showsBuildings={false}
+          showsIndoors={false}
+          toolbarEnabled={false}
+          moveOnMarkerPress={false}
+          liteMode={false}
+          onMapReady={() => {
+            setMapReady(true);
+            console.log("[cockpit] map ready");
+          }}
+          onRegionChange={(next) => {
+            setCameraMoving(true);
+            scheduleRegionPaint(next);
+            // Fallback if complete doesn't fire (some Android builds).
+            if (moveEndTimerRef.current) clearTimeout(moveEndTimerRef.current);
+            moveEndTimerRef.current = setTimeout(() => {
+              setCameraMoving(false);
+            }, 180);
+          }}
+          onRegionChangeComplete={(next) => {
+            if (moveEndTimerRef.current) clearTimeout(moveEndTimerRef.current);
+            regionRef.current = next;
+            setRegion(next);
+            setCameraMoving(false);
+            onRegionChangeRef.current?.(next);
+          }}
+        >
+          {selectedId ? <AircraftTrail points={trail} /> : null}
+          {visibleFlights.map((flight) => (
+            <AircraftMarker
+              key={flight.fr24Id}
+              flight={flight}
+              selected={flight.fr24Id === selectedId}
+              onPress={onSelectFlight}
+            />
+          ))}
+        </MapView>
+
+        {/* Callsign badges: normal RN views, not Marker children */}
+        {showBadgeLayer ? (
+          <View style={styles.badgeOverlay} pointerEvents="box-none">
+            {visibleFlights.map((flight) => {
+              const selected = flight.fr24Id === selectedId;
+              const emergency = isEmergencySquawk(flight.squawk);
+              // Zoomed out: only keep selected / emergency labels.
+              if (!zoomAllowsCallsigns && !selected && !emergency) {
+                return null;
+              }
+              const { x, y } = projectToScreen(
+                flight.latitude,
+                flight.longitude,
+                activeRegion,
+                mapSize,
+              );
+              // Skip far off-screen (saves work; generous margin for long labels).
+              if (
+                x < -80 ||
+                y < -60 ||
+                x > mapSize.w + 80 ||
+                y > mapSize.h + 40
+              ) {
+                return null;
+              }
+              // Fixed hit box centered on plane; badge is intrinsically sized inside.
+              const hitW = 150;
+              return (
+                <Pressable
+                  key={`badge-${flight.fr24Id}`}
+                  onPress={() => onSelectFlight(flight)}
+                  style={[
+                    styles.badgeAnchor,
+                    {
+                      left: x - hitW / 2,
+                      top: y - BADGE_ABOVE_PLANE - 32,
+                      width: hitW,
+                      zIndex: selected ? 20 : emergency ? 15 : 10,
+                    },
+                  ]}
+                >
+                  <CallsignBadge
+                    flight={flight}
+                    selected={selected}
+                    emergency={emergency}
+                  />
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
+
+        {!mapReady ? (
+          <View style={styles.mapBoot} pointerEvents="none">
+            <Text style={styles.mapBootText}>Loading map…</Text>
+          </View>
+        ) : !markersEnabled ? (
+          <View style={styles.mapBootLight} pointerEvents="none">
+            <Text style={styles.mapBootText}>Placing aircraft…</Text>
+          </View>
+        ) : null}
       </View>
     );
-  }
-
-  const activeRegion = region ?? bootRegion;
-  const zoomAllowsCallsigns = callsignsVisibleAtZoom(activeRegion);
-  const showBadgeLayer = markersEnabled && mapSize.w > 0 && !cameraMoving;
-
-  return (
-    <View style={styles.map} onLayout={onMapLayout}>
-      <MapView
-        ref={mapRef}
-        style={StyleSheet.absoluteFill}
-        provider={PROVIDER_DEFAULT}
-        initialRegion={bootRegion}
-        customMapStyle={DARK_MAP_STYLE}
-        userInterfaceStyle="dark"
-        mapType="standard"
-        showsUserLocation={userLocationPermitted}
-        showsMyLocationButton={false}
-        showsCompass={false}
-        showsScale={false}
-        showsTraffic={false}
-        showsBuildings={false}
-        showsIndoors={false}
-        toolbarEnabled={false}
-        moveOnMarkerPress={false}
-        liteMode={false}
-        onMapReady={() => {
-          setMapReady(true);
-          console.log("[cockpit] map ready");
-        }}
-        onRegionChange={(next) => {
-          setCameraMoving(true);
-          scheduleRegionPaint(next);
-          // Fallback if complete doesn't fire (some Android builds).
-          if (moveEndTimerRef.current) clearTimeout(moveEndTimerRef.current);
-          moveEndTimerRef.current = setTimeout(() => {
-            setCameraMoving(false);
-          }, 180);
-        }}
-        onRegionChangeComplete={(next) => {
-          if (moveEndTimerRef.current) clearTimeout(moveEndTimerRef.current);
-          regionRef.current = next;
-          setRegion(next);
-          setCameraMoving(false);
-          onRegionChangeRef.current?.(next);
-        }}
-      >
-        {selectedId ? <AircraftTrail points={trail} /> : null}
-        {visibleFlights.map((flight) => (
-          <AircraftMarker
-            key={flight.fr24Id}
-            flight={flight}
-            selected={flight.fr24Id === selectedId}
-            onPress={onSelectFlight}
-          />
-        ))}
-      </MapView>
-
-      {/* Callsign badges: normal RN views, not Marker children */}
-      {showBadgeLayer ? (
-        <View style={styles.badgeOverlay} pointerEvents="box-none">
-          {visibleFlights.map((flight) => {
-            const selected = flight.fr24Id === selectedId;
-            const emergency = isEmergencySquawk(flight.squawk);
-            // Zoomed out: only keep selected / emergency labels.
-            if (!zoomAllowsCallsigns && !selected && !emergency) {
-              return null;
-            }
-            const { x, y } = projectToScreen(
-              flight.latitude,
-              flight.longitude,
-              activeRegion,
-              mapSize,
-            );
-            // Skip far off-screen (saves work; generous margin for long labels).
-            if (
-              x < -80 ||
-              y < -60 ||
-              x > mapSize.w + 80 ||
-              y > mapSize.h + 40
-            ) {
-              return null;
-            }
-            // Fixed hit box centered on plane; badge is intrinsically sized inside.
-            const hitW = 150;
-            return (
-              <Pressable
-                key={`badge-${flight.fr24Id}`}
-                onPress={() => onSelectFlight(flight)}
-                style={[
-                  styles.badgeAnchor,
-                  {
-                    left: x - hitW / 2,
-                    top: y - BADGE_ABOVE_PLANE - 32,
-                    width: hitW,
-                    zIndex: selected ? 20 : emergency ? 15 : 10,
-                  },
-                ]}
-              >
-                <CallsignBadge
-                  flight={flight}
-                  selected={selected}
-                  emergency={emergency}
-                />
-              </Pressable>
-            );
-          })}
-        </View>
-      ) : null}
-
-      {!mapReady ? (
-        <View style={styles.mapBoot} pointerEvents="none">
-          <Text style={styles.mapBootText}>Loading map…</Text>
-        </View>
-      ) : !markersEnabled ? (
-        <View style={styles.mapBootLight} pointerEvents="none">
-          <Text style={styles.mapBootText}>Placing aircraft…</Text>
-        </View>
-      ) : null}
-    </View>
-  );
-}
+  },
+);
 
 /** Simple lat/lon projection for web / fallback — no map tiles. */
-function WebFlightMap({
-  flights,
-  selectedId,
-  trail,
-  onSelectFlight,
-  onRegionChange,
-}: Props) {
+const WebFlightMap = forwardRef<FlightMapHandle, Props>(function WebFlightMap(
+  { flights, selectedId, trail, onSelectFlight, onRegionChange },
+  ref,
+) {
   const [size, setSize] = useState({ w: 1, h: 1 });
   const onRegionChangeRef = useRef(onRegionChange);
   onRegionChangeRef.current = onRegionChange;
   const { coords: userCoords, status } = useUserLocation(true);
   const bootRegion = useBootRegion(userCoords, status);
-  const region = bootRegion ?? hubRegion();
+  const [region, setRegion] = useState<Region | null>(null);
+  const activeRegion = region ?? bootRegion ?? hubRegion();
   const smoothed = useSmoothedFlights(flights);
 
   useEffect(() => {
     if (!bootRegion) return;
+    setRegion(bootRegion);
     onRegionChangeRef.current?.(bootRegion);
   }, [bootRegion]);
+
+  const recenterOnUser = useCallback(() => {
+    const latitude = userCoords?.latitude ?? HUB.latitude;
+    const longitude = userCoords?.longitude ?? HUB.longitude;
+    const next = regionAround(latitude, longitude, HUB.radiusMeters);
+    setRegion(next);
+    onRegionChangeRef.current?.(next);
+  }, [userCoords]);
+
+  const flyTo = useCallback((latitude: number, longitude: number) => {
+    const next = regionAround(latitude, longitude, HUB.radiusMeters);
+    setRegion(next);
+    onRegionChangeRef.current?.(next);
+  }, []);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      recenterOnUser,
+      flyTo,
+    }),
+    [recenterOnUser, flyTo],
+  );
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -432,11 +492,11 @@ function WebFlightMap({
   };
 
   const project = (lat: number, lon: number) =>
-    projectToScreen(lat, lon, region, size);
+    projectToScreen(lat, lon, activeRegion, size);
 
   const metersToPx = (meters: number) => {
     const deg = meters / 111_320;
-    return (deg / region.latitudeDelta) * size.h;
+    return (deg / activeRegion.latitudeDelta) * size.h;
   };
 
   const trailSegments = useMemo(
@@ -531,7 +591,7 @@ function WebFlightMap({
         // SVG nose points up; rotation is true heading (no emoji −45° offset).
         const rotate = `${((flight.heading % 360) + 360) % 360}deg`;
         const showLabel =
-          callsignsVisibleAtZoom(region) || selected || emergency;
+          callsignsVisibleAtZoom(activeRegion) || selected || emergency;
         const half = AIRCRAFT_ICON_SIZE / 2;
         return (
           <Pressable
@@ -571,7 +631,7 @@ function WebFlightMap({
       })}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   map: {

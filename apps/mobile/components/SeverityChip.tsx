@@ -3,7 +3,7 @@ import type { Severity } from "@cockpit/shared";
 import { colors, radius, spacing, typography } from "../constants/theme";
 
 const map: Record<Severity, { bg: string; fg: string }> = {
-  info: { bg: colors.accentSoft, fg: colors.accent },
+  info: { bg: colors.accentSoft, fg: colors.text },
   warning: { bg: colors.warningSoft, fg: colors.warning },
   critical: { bg: colors.dangerSoft, fg: colors.danger },
 };
