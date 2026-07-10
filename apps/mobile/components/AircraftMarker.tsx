@@ -42,10 +42,10 @@ function AircraftMarkerInner({ flight, selected, onPress }: Props) {
   const tint = emergency
     ? colors.danger
     : selected
-      ? colors.accent
+      ? colors.success
       : flight.onGround
         ? colors.textDim
-        : colors.success;
+        : "#FFFFFF";
 
   // Silhouette nose points up (north); rotate by true heading degrees.
   const rotation = ((flight.heading % 360) + 360) % 360;

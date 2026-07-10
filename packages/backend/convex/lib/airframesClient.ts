@@ -13,8 +13,7 @@ export const AIRFRAMES_BASE = "https://api.airframes.io/v1";
 
 export const AIRFRAMES_HEADERS: Record<string, string> = {
   accept: "application/json",
-  "user-agent":
-    "Cockpit/0.1 (educational; +https://github.com/local/cockpit)",
+  "user-agent": "Cockpit/0.1 (educational; +https://github.com/local/cockpit)",
   // Browser-like origin helps avoid occasional edge 404s on this API.
   origin: "https://app.airframes.io",
   referer: "https://app.airframes.io/",
@@ -87,13 +86,7 @@ export type MappedAcarsMessage = {
   registration?: string;
   label?: string;
   timestamp: number;
-  category:
-    | "position"
-    | "weather"
-    | "ops"
-    | "emergency"
-    | "system"
-    | "other";
+  category: "position" | "weather" | "ops" | "emergency" | "system" | "other";
   severity: "info" | "warning" | "critical";
   raw: string;
   decoded?: string;
@@ -269,7 +262,10 @@ const SYSTEM_RE = /\b(Q0|_d|LOGON|LOGOFF|HANG)\b/i;
 export function categorizeMessage(
   body: string,
   label: string | null | undefined,
-): { category: MappedAcarsMessage["category"]; severity: MappedAcarsMessage["severity"] } {
+): {
+  category: MappedAcarsMessage["category"];
+  severity: MappedAcarsMessage["severity"];
+} {
   const blob = `${label ?? ""} ${body}`;
   if (EMERGENCY_RE.test(blob)) {
     return { category: "emergency", severity: "critical" };
@@ -303,7 +299,11 @@ function pickCallsign(msg: AirframesMessage): string | undefined {
 }
 
 function pickFlightNumber(msg: AirframesMessage): string | undefined {
-  const candidates = [msg.flight?.flightIata, msg.flight?.flight, msg.flightNumber];
+  const candidates = [
+    msg.flight?.flightIata,
+    msg.flight?.flight,
+    msg.flightNumber,
+  ];
   for (const c of candidates) {
     const t = c?.replace(/\s+/g, "").toUpperCase();
     if (t) return t;
@@ -320,13 +320,17 @@ function pickIcao(msg: AirframesMessage): string | undefined {
   return fromAirframe;
 }
 
-export function mapAirframesMessage(msg: AirframesMessage): MappedAcarsMessage {
+export function mapAirframesMessage(
+  msg: AirframesMessage,
+): MappedAcarsMessage | null {
+  if (!messageBody(msg)) return null;
   const raw = messageBody(msg) || `(empty ${msg.sourceType ?? "acars"} frame)`;
   const label = msg.label?.trim() || undefined;
   const { category, severity } = categorizeMessage(raw, label);
   const sourceType = msg.sourceType || msg.source || "acars";
   const station = msg.station?.ident;
-  const tail = (msg.airframe?.tail || msg.tail || undefined)?.trim() || undefined;
+  const tail =
+    (msg.airframe?.tail || msg.tail || undefined)?.trim() || undefined;
   const icao24 = pickIcao(msg);
   const callsign = pickCallsign(msg);
   const flightNumber = pickFlightNumber(msg);
@@ -372,7 +376,9 @@ export async function searchForFlightIdentity(
 ): Promise<MappedAcarsMessage[]> {
   const limit = clampLimit(opts?.limit);
   const icao = normalizeHex(keys.icao24);
-  const callsign = normalizeText(keys.callsign)?.replace(/\s+/g, "").toUpperCase();
+  const callsign = normalizeText(keys.callsign)
+    ?.replace(/\s+/g, "")
+    .toUpperCase();
   const flightNumber = normalizeText(keys.flightNumber)
     ?.replace(/\s+/g, "")
     .toUpperCase();
@@ -382,6 +388,7 @@ export async function searchForFlightIdentity(
   const merge = (rows: AirframesMessage[]) => {
     for (const row of rows) {
       const mapped = mapAirframesMessage(row);
+      if (!mapped) continue;
       if (!seen.has(mapped.externalId)) seen.set(mapped.externalId, mapped);
     }
   };
@@ -402,8 +409,8 @@ export async function searchForFlightIdentity(
   // Text search when ICAO missed or returned nothing (TBG-style keyword).
   const needText = !icao || seen.size === 0;
   if (needText) {
-    const terms = [callsign, flightNumber].filter(
-      (t): t is string => Boolean(t),
+    const terms = [callsign, flightNumber].filter((t): t is string =>
+      Boolean(t),
     );
     // Deduplicate terms (UAL123 vs UA123 still both useful).
     const unique = [...new Set(terms)];

@@ -135,12 +135,11 @@ export function buildAcarsExplainMessages(input: {
   return {
     instructions: [
       "You are an aviation ACARS analyst for flight-tracking enthusiasts.",
-      "Explain raw ACARS/VDL/HFDL messages in plain language.",
-      "Be concise (3-6 short paragraphs or bullets).",
-      "Cover: what the message is, operational meaning, any position/route/fuel/ops cues, and confidence.",
+      "Explain raw ACARS/VDL/HFDL messages in plain language, without bold, italic etc. Only use plain text without markdown formatting.",
+      "Be concise (a few short sentences).",
+      "Cover what the message is, (e.g. operational meaning, any position/route/fuel/ops cues if any, etc. If none, don't say something like 'no position update' or 'no explicit altitude given')",
       "If the payload is opaque binary/hex or empty, say so and note the label/type if useful.",
-      "Do not invent flight numbers, airports, or emergencies that are not supported by the text.",
-      "No markdown headings; light bullets OK. No fluff.",
+      "Do not invent flight numbers, airports, or emergencies that are not supported by the text. Only return the interpretation",
     ].join(" "),
     messages: [
       {

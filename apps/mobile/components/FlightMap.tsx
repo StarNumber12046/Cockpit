@@ -16,10 +16,7 @@ import { DARK_MAP_STYLE, radiusToLatitudeDelta } from "../constants/mapStyle";
 import { colors, radius, spacing, typography } from "../constants/theme";
 import { useSmoothedFlights } from "../hooks/useSmoothedFlights";
 import { useUserLocation } from "../hooks/useUserLocation";
-import {
-  buildTrailSegments,
-  type TrailPointLike,
-} from "../lib/altitudeColor";
+import { buildTrailSegments, type TrailPointLike } from "../lib/altitudeColor";
 import { AIRCRAFT_ICON_SIZE, AircraftIcon } from "./AircraftIcon";
 import { AircraftMarker, isValidMapCoordinate } from "./AircraftMarker";
 import { AircraftTrail } from "./AircraftTrail";
@@ -96,8 +93,7 @@ function projectToScreen(
   const halfLon = region.longitudeDelta / 2;
   const x =
     ((lon - (region.longitude - halfLon)) / region.longitudeDelta) * size.w;
-  const y =
-    ((region.latitude + halfLat - lat) / region.latitudeDelta) * size.h;
+  const y = ((region.latitude + halfLat - lat) / region.latitudeDelta) * size.h;
   return { x, y };
 }
 
@@ -184,8 +180,11 @@ function NativeFlightMap({
   const mapRef = useRef<MapView>(null);
   const onRegionChangeRef = useRef(onRegionChange);
   onRegionChangeRef.current = onRegionChange;
-  const { permitted: userLocationPermitted, coords, status } =
-    useUserLocation(true);
+  const {
+    permitted: userLocationPermitted,
+    coords,
+    status,
+  } = useUserLocation(true);
   const bootRegion = useBootRegion(coords, status);
   const [mapReady, setMapReady] = useState(false);
   const [markersEnabled, setMarkersEnabled] = useState(false);
@@ -287,8 +286,7 @@ function NativeFlightMap({
 
   const activeRegion = region ?? bootRegion;
   const zoomAllowsCallsigns = callsignsVisibleAtZoom(activeRegion);
-  const showBadgeLayer =
-    markersEnabled && mapSize.w > 0 && !cameraMoving;
+  const showBadgeLayer = markersEnabled && mapSize.w > 0 && !cameraMoving;
 
   return (
     <View style={styles.map} onLayout={onMapLayout}>
@@ -526,10 +524,10 @@ function WebFlightMap({
         const tint = emergency
           ? colors.danger
           : selected
-            ? colors.accent
+            ? colors.success
             : flight.onGround
               ? colors.textDim
-              : colors.success;
+              : "#FFFFFF";
         // SVG nose points up; rotation is true heading (no emoji −45° offset).
         const rotate = `${((flight.heading % 360) + 360) % 360}deg`;
         const showLabel =

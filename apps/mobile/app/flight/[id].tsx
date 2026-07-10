@@ -47,14 +47,9 @@ export default function FlightDetailScreen() {
   const keys: CorrelationKeys = useMemo(() => {
     const fromDetail = keysFromFlight({
       fr24Id,
-      icao24:
-        params.icao24 ||
-        detail?.aircraft?.hex ||
-        undefined,
+      icao24: params.icao24 || detail?.aircraft?.hex || undefined,
       callsign:
-        params.callsign ||
-        detail?.identification?.callsign ||
-        undefined,
+        params.callsign || detail?.identification?.callsign || undefined,
       flightNumber:
         params.flightNumber ||
         detail?.identification?.number?.default ||
@@ -152,8 +147,7 @@ export default function FlightDetailScreen() {
   });
 
   const origin =
-    detail?.airport?.origin?.code?.iata ??
-    detail?.airport?.origin?.code?.icao;
+    detail?.airport?.origin?.code?.iata ?? detail?.airport?.origin?.code?.icao;
   const dest =
     detail?.airport?.destination?.code?.iata ??
     detail?.airport?.destination?.code?.icao;
@@ -225,7 +219,9 @@ export default function FlightDetailScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      {error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
+      {error ? (
+        <ErrorBanner message={error} onRetry={() => void refresh()} />
+      ) : null}
 
       {photo?.uri ? (
         <View style={styles.photoWrap}>
@@ -247,7 +243,9 @@ export default function FlightDetailScreen() {
         </View>
       ) : photoLoading ? (
         <View style={styles.photoPlaceholder}>
-          <Text style={styles.photoPlaceholderText}>Loading aircraft photo…</Text>
+          <Text style={styles.photoPlaceholderText}>
+            Loading aircraft photo…
+          </Text>
         </View>
       ) : null}
 
@@ -275,7 +273,9 @@ export default function FlightDetailScreen() {
         </View>
         {statusText ? <Text style={styles.status}>{statusText}</Text> : null}
         <Text style={styles.meta}>FR24 · {fr24Id}</Text>
-        {keys.icao24 ? <Text style={styles.meta}>ICAO24 · {keys.icao24}</Text> : null}
+        {keys.icao24 ? (
+          <Text style={styles.meta}>ICAO24 · {keys.icao24}</Text>
+        ) : null}
         <Pressable style={styles.trackBtn} onPress={() => void onTrack()}>
           <Text style={styles.trackBtnText}>Track this flight</Text>
         </Pressable>
@@ -295,18 +295,25 @@ export default function FlightDetailScreen() {
                 "—"
               }
             />
-            <Row label="Registration" value={detail?.aircraft?.registration || "—"} />
+            <Row
+              label="Registration"
+              value={detail?.aircraft?.registration || "—"}
+            />
             <Row label="Airline" value={detail?.airline?.name || "—"} />
             <Row label="Trail points" value={String(trailLen)} />
             {detail?.trail?.[detail.trail.length - 1] ? (
               <>
                 <Row
                   label="Last alt"
-                  value={formatAltitude(detail.trail[detail.trail.length - 1]?.alt)}
+                  value={formatAltitude(
+                    detail.trail[detail.trail.length - 1]?.alt,
+                  )}
                 />
                 <Row
                   label="Last fix"
-                  value={formatTimestamp(detail.trail[detail.trail.length - 1]?.ts)}
+                  value={formatTimestamp(
+                    detail.trail[detail.trail.length - 1]?.ts,
+                  )}
                 />
               </>
             ) : null}
@@ -342,7 +349,7 @@ export default function FlightDetailScreen() {
           <Text style={styles.liveMeta}>{acarsLiveMeta}</Text>
         ) : null}
         <Text style={styles.acarsHint}>
-          Tap a message for a server-streamed AI explanation (saved for next time).
+          Tap a message for a the explanation.
         </Text>
         {acars === undefined ||
         (acarsRefreshing && (acars?.length ?? 0) === 0) ? (

@@ -61,8 +61,8 @@ export function buildFlightNarrative(flight: Fr24Flight): string {
     ? ` ${flight.aircraftCode}`
     : " aircraft";
 
-  return `${phase} on ${route}.${destClause} ${typeClause} · ${spd}${
-    flight.squawk ? ` · squawk ${flight.squawk}` : ""
+  return `${phase} ${destClause}${
+    flight.squawk ? `, squawking ${flight.squawk}` : ""
   }.`.replace(/\s+/g, " ");
 }
 
@@ -240,7 +240,10 @@ export function FlightSheet({
 
         <Pressable
           onPress={() => onOpenDetails?.(display)}
-          style={({ pressed }) => [styles.body, pressed ? styles.pressed : null]}
+          style={({ pressed }) => [
+            styles.body,
+            pressed ? styles.pressed : null,
+          ]}
         >
           <View style={styles.topRow}>
             <View style={styles.identity}>
