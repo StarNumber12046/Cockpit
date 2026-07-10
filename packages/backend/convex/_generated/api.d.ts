@@ -9,8 +9,12 @@
  */
 
 import type * as acars from "../acars.js";
+import type * as acarsExplain from "../acarsExplain.js";
+import type * as acarsLive from "../acarsLive.js";
 import type * as alerts from "../alerts.js";
+import type * as lib_airframesClient from "../lib/airframesClient.js";
 import type * as lib_correlation from "../lib/correlation.js";
+import type * as lib_llmStream from "../lib/llmStream.js";
 import type * as seed from "../seed.js";
 import type * as tracked from "../tracked.js";
 
@@ -22,8 +26,12 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   acars: typeof acars;
+  acarsExplain: typeof acarsExplain;
+  acarsLive: typeof acarsLive;
   alerts: typeof alerts;
+  "lib/airframesClient": typeof lib_airframesClient;
   "lib/correlation": typeof lib_correlation;
+  "lib/llmStream": typeof lib_llmStream;
   seed: typeof seed;
   tracked: typeof tracked;
 }>;

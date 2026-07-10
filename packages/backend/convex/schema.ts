@@ -27,12 +27,41 @@ export default defineSchema({
       v.literal("warning"),
       v.literal("critical"),
     ),
+    /** Provenance: seed | airframes */
+    source: v.optional(v.string()),
+    /** Upstream id (e.g. Airframes message id) for ingest dedupe. */
+    externalId: v.optional(v.string()),
+    /** Aircraft registration / tail when known. */
+    registration: v.optional(v.string()),
+    /** ACARS label field when present. */
+    label: v.optional(v.string()),
   })
     .index("by_fr24Id", ["fr24Id"])
     .index("by_icao24", ["icao24"])
     .index("by_flightNumber", ["flightNumber"])
     .index("by_callsign", ["callsign"])
-    .index("by_timestamp", ["timestamp"]),
+    .index("by_timestamp", ["timestamp"])
+    .index("by_externalId", ["externalId"]),
+
+  /**
+   * AI explanations for ACARS messages (streamed into DB while generating).
+   * One row per message; regenerated with force.
+   */
+  acarsExplanations: defineTable({
+    messageId: v.id("acarsMessages"),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("streaming"),
+      v.literal("ready"),
+      v.literal("error"),
+    ),
+    /** Partial while streaming; final text when ready. */
+    text: v.string(),
+    error: v.optional(v.string()),
+    model: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_messageId", ["messageId"]),
 
   alerts: defineTable({
     ...correlationFields,

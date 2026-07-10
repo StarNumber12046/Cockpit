@@ -1,9 +1,10 @@
 import { memo, useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
 import { Marker } from "react-native-maps";
 import type { Fr24Flight } from "@cockpit/fr24";
 import { isEmergencySquawk } from "@cockpit/shared";
 import { colors } from "../constants/theme";
+import { AIRCRAFT_ICON_SIZE, AircraftIcon } from "./AircraftIcon";
 
 type Props = {
   flight: Fr24Flight;
@@ -12,11 +13,30 @@ type Props = {
 };
 
 /**
- * Custom map glyph. tracksViewChanges stays false most of the time so a large
- * fleet does not freeze Android on snapshot work — but we briefly re-enable it
- * after mount / appearance changes so the custom view is captured (otherwise
- * selected remounts render as blank and the aircraft "disappears").
+ * Plane glyph only — ICAO-type SVG silhouette (no circle). Callsign badges are
+ * a screen overlay (Android Marker bitmaps clip Text).
  */
+/** Hit box fits scaled heavies (~1.25×) without clipping the silhouette. */
+const HIT = Math.ceil(AIRCRAFT_ICON_SIZE * 1.35) + 4;
+/**
+ * Android snapshots Marker children to bitmaps while tracksViewChanges is true.
+ * Keep this short — many markers enabling together can OOM the heap.
+ */
+const TRACK_MS = Platform.OS === "android" ? 250 : 600;
+
+/** Native maps reject non-finite lat/lon and can crash the property update. */
+export function isValidMapCoordinate(
+  latitude: number,
+  longitude: number,
+): boolean {
+  return (
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    Math.abs(latitude) <= 90 &&
+    Math.abs(longitude) <= 180
+  );
+}
+
 function AircraftMarkerInner({ flight, selected, onPress }: Props) {
   const emergency = isEmergencySquawk(flight.squawk);
   const tint = emergency
@@ -27,15 +47,20 @@ function AircraftMarkerInner({ flight, selected, onPress }: Props) {
         ? colors.textDim
         : colors.success;
 
-  // ✈ faces ~NE; offset so nose tracks true heading via native rotation.
-  const rotation = ((flight.heading % 360) + 360) % 360 - 45;
+  // Silhouette nose points up (north); rotate by true heading degrees.
+  const rotation = ((flight.heading % 360) + 360) % 360;
+  const coordsValid = isValidMapCoordinate(flight.latitude, flight.longitude);
 
   const [tracksViewChanges, setTracksViewChanges] = useState(true);
   useEffect(() => {
+    if (!coordsValid) return;
     setTracksViewChanges(true);
-    const timer = setTimeout(() => setTracksViewChanges(false), 500);
-    return () => clearTimeout(timer);
-  }, [selected, emergency, flight.onGround, tint]);
+    const t = setTimeout(() => setTracksViewChanges(false), TRACK_MS);
+    return () => clearTimeout(t);
+  }, [coordsValid, selected, emergency, flight.onGround, tint, flight.aircraftCode]);
+
+  // Never push non-finite coords to AIRMapMarker — native update can OOM/crash.
+  if (!coordsValid) return null;
 
   return (
     <Marker
@@ -56,17 +81,11 @@ function AircraftMarkerInner({ flight, selected, onPress }: Props) {
       identifier={flight.fr24Id}
     >
       <View style={styles.hit} collapsable={false}>
-        <View
-          collapsable={false}
-          style={[
-            styles.glyph,
-            { borderColor: tint },
-            selected ? styles.glyphSelected : null,
-            emergency ? styles.glyphHot : null,
-          ]}
-        >
-          <Text style={[styles.plane, { color: tint }]}>✈</Text>
-        </View>
+        <AircraftIcon
+          aircraftCode={flight.aircraftCode}
+          color={tint}
+          size={AIRCRAFT_ICON_SIZE}
+        />
       </View>
     </Marker>
   );
@@ -82,41 +101,15 @@ export const AircraftMarker = memo(
     a.flight.heading === b.flight.heading &&
     a.flight.squawk === b.flight.squawk &&
     a.flight.onGround === b.flight.onGround &&
-    a.flight.callsign === b.flight.callsign &&
-    a.flight.flightNumber === b.flight.flightNumber,
+    a.flight.aircraftCode === b.flight.aircraftCode,
 );
-
-const SIZE = 36;
 
 const styles = StyleSheet.create({
   hit: {
-    width: SIZE,
-    height: SIZE,
+    width: HIT,
+    height: HIT,
     alignItems: "center",
     justifyContent: "center",
-  },
-  glyph: {
-    width: SIZE,
-    height: SIZE,
-    borderRadius: SIZE / 2,
-    borderWidth: 2,
-    // Opaque — translucent fills often corrupt Android marker bitmaps.
-    backgroundColor: "#0B1220",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  glyphSelected: {
-    borderWidth: 3,
-    backgroundColor: "#121A2B",
-  },
-  glyphHot: {
-    backgroundColor: "#2A1218",
-  },
-  plane: {
-    fontSize: 16,
-    fontWeight: "700",
-    includeFontPadding: false,
-    textAlign: "center",
+    backgroundColor: "transparent",
   },
 });

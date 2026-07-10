@@ -219,6 +219,9 @@ const styles = StyleSheet.create({
     right: 0,
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
+    // Above map badge overlay (zIndex 5) — Android elevation required too.
+    zIndex: 50,
+    elevation: 50,
   },
   hud: {
     flexDirection: "row",

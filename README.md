@@ -52,6 +52,15 @@ pnpm convex:seed
 # or: pnpm --filter @cockpit/backend seed
 ```
 
+Optional — AI ACARS explanations (tap a message in flight detail):
+
+```bash
+cd packages/backend
+npx convex env set GROQ_API_KEY <your-groq-key>
+# optional model override (default llama-3.1-8b-instant)
+# npx convex env set ACARS_EXPLAIN_MODEL llama-3.1-8b-instant
+```
+
 ### 2. Dev servers
 
 ```bash
@@ -84,7 +93,9 @@ Run once online to populate `~/.expo` cache, then offline works cleanly.
 1. Device fetches FR24 feed/detail/search via `@cockpit/fr24`
 2. **Live tab** is a map of aircraft (react-native-maps); tap a symbol for a bottom flight sheet, then full detail
 3. Convex stores ACARS, alerts, tracked flights only (no live positions)
-4. Correlation keys (prefer order): `fr24Id` → `icao24` → `callsign` / `flightNumber`
+4. Live ACARS is pulled server-side from the [Airframes messages API](https://docs.airframes.io/api/) (`acarsLive.refreshForFlight` / `acarsLive.search`) — same feeder network as [TBG search](https://tbg.airframes.io/search/dashboard/search)
+5. Tap an ACARS message → `acarsExplain.request` streams a Groq explanation into `acarsExplanations` (requires `GROQ_API_KEY` on Convex)
+6. Correlation keys (prefer order): `fr24Id` → `icao24` → `callsign` / `flightNumber`
 
 ## Switching Convex targets
 

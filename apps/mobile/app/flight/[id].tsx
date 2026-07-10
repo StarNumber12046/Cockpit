@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Image,
   Pressable,
@@ -8,7 +8,7 @@ import {
   View,
 } from "react-native";
 import { useLocalSearchParams } from "expo-router";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import {
   formatAltitude,
   formatFlightLabel,
@@ -23,6 +23,7 @@ import { LoadingState } from "../../components/LoadingState";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { SeverityChip } from "../../components/SeverityChip";
+import { AcarsMessageCard } from "../../components/AcarsMessageCard";
 import { colors, radius, spacing, typography } from "../../constants/theme";
 import {
   airlineLogoCandidates,
@@ -75,9 +76,74 @@ export default function FlightDetailScreen() {
   const acars = useQuery(api.acars.listForFlight, queryArgs);
   const alerts = useQuery(api.alerts.listForFlight, queryArgs);
   const addTracked = useMutation(api.tracked.add);
+  const refreshAcars = useAction(api.acarsLive.refreshForFlight);
 
   const [photo, setPhoto] = useState<AircraftPhoto | null>(null);
   const [photoLoading, setPhotoLoading] = useState(false);
+  const [acarsRefreshing, setAcarsRefreshing] = useState(false);
+  const [acarsLiveError, setAcarsLiveError] = useState<string | null>(null);
+  const [acarsLiveMeta, setAcarsLiveMeta] = useState<string | null>(null);
+  const autoFetchKey = useRef<string | null>(null);
+
+  const canFetchAcars = Boolean(
+    keys.icao24 || keys.callsign || keys.flightNumber,
+  );
+
+  const pullLiveAcars = useCallback(async () => {
+    if (!canFetchAcars) return;
+    setAcarsRefreshing(true);
+    setAcarsLiveError(null);
+    try {
+      const result = await refreshAcars({
+        fr24Id: keys.fr24Id,
+        icao24: keys.icao24,
+        callsign: keys.callsign,
+        flightNumber: keys.flightNumber,
+        limit: 40,
+      });
+      if (!result.ok) {
+        setAcarsLiveError(result.error ?? "Live ACARS fetch failed");
+        setAcarsLiveMeta(null);
+      } else {
+        setAcarsLiveMeta(
+          result.count === 0
+            ? "No recent Airframes messages for this identity"
+            : `Airframes · ${result.count} hit${result.count === 1 ? "" : "s"}` +
+                (result.inserted
+                  ? ` · ${result.inserted} new`
+                  : " · already stored"),
+        );
+      }
+    } catch (err) {
+      setAcarsLiveError(
+        err instanceof Error ? err.message : "Live ACARS fetch failed",
+      );
+      setAcarsLiveMeta(null);
+    } finally {
+      setAcarsRefreshing(false);
+    }
+  }, [
+    canFetchAcars,
+    keys.callsign,
+    keys.flightNumber,
+    keys.fr24Id,
+    keys.icao24,
+    refreshAcars,
+  ]);
+
+  // Auto-pull once per identity when FR24 detail (or route params) yield keys.
+  useEffect(() => {
+    if (!canFetchAcars) return;
+    const key = [
+      keys.fr24Id ?? "",
+      keys.icao24 ?? "",
+      keys.callsign ?? "",
+      keys.flightNumber ?? "",
+    ].join("|");
+    if (autoFetchKey.current === key) return;
+    autoFetchKey.current = key;
+    void pullLiveAcars();
+  }, [canFetchAcars, keys, pullLiveAcars]);
 
   const title = formatFlightLabel({
     callsign: keys.callsign,
@@ -249,24 +315,50 @@ export default function FlightDetailScreen() {
       )}
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>ACARS</Text>
-        {acars === undefined ? (
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>ACARS</Text>
+          <Pressable
+            style={[
+              styles.refreshBtn,
+              (!canFetchAcars || acarsRefreshing) && styles.refreshBtnDisabled,
+            ]}
+            disabled={!canFetchAcars || acarsRefreshing}
+            onPress={() => void pullLiveAcars()}
+          >
+            <Text style={styles.refreshBtnText}>
+              {acarsRefreshing ? "Fetching…" : "Refresh live"}
+            </Text>
+          </Pressable>
+        </View>
+        {acarsLiveError ? (
+          <View style={styles.acarsError}>
+            <Text style={styles.acarsErrorText}>{acarsLiveError}</Text>
+            <Pressable onPress={() => void pullLiveAcars()} hitSlop={8}>
+              <Text style={styles.refreshBtnText}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : null}
+        {acarsLiveMeta ? (
+          <Text style={styles.liveMeta}>{acarsLiveMeta}</Text>
+        ) : null}
+        <Text style={styles.acarsHint}>
+          Tap a message for a server-streamed AI explanation (saved for next time).
+        </Text>
+        {acars === undefined ||
+        (acarsRefreshing && (acars?.length ?? 0) === 0) ? (
           <LoadingState label="Loading ACARS…" />
         ) : acars.length === 0 ? (
           <EmptyState
             title="No ACARS for this identity"
-            message="Seed demo data (UAL123, AA456, DL789, DEMO1) or wait for correlated messages."
+            message={
+              canFetchAcars
+                ? "No stored or recent Airframes messages. Try Refresh live, or open a busier airframe."
+                : "Need ICAO24 / callsign / flight number to search live ACARS."
+            }
           />
         ) : (
           acars.map((msg: (typeof acars)[number]) => (
-            <View key={msg._id} style={styles.card}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.cardTitle}>{msg.category}</Text>
-                <SeverityChip severity={msg.severity} />
-              </View>
-              <Text style={styles.body}>{msg.decoded || msg.raw}</Text>
-              <Text style={styles.meta}>{formatTimestamp(msg.timestamp)}</Text>
-            </View>
+            <AcarsMessageCard key={msg._id} message={msg} />
           ))
         )}
       </View>
@@ -411,11 +503,57 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
   },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
   sectionTitle: {
     ...typography.caption,
     textTransform: "uppercase",
     letterSpacing: 0.6,
     color: colors.textDim,
+  },
+  refreshBtn: {
+    backgroundColor: colors.accentSoft,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  refreshBtnDisabled: {
+    opacity: 0.5,
+  },
+  refreshBtnText: {
+    ...typography.caption,
+    color: colors.accent,
+    fontWeight: "600",
+  },
+  liveMeta: {
+    ...typography.caption,
+    color: colors.success,
+  },
+  acarsHint: {
+    ...typography.caption,
+    color: colors.textDim,
+  },
+  acarsError: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.dangerSoft,
+    borderColor: colors.danger,
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  acarsErrorText: {
+    ...typography.caption,
+    color: colors.danger,
+    flex: 1,
   },
   card: {
     backgroundColor: colors.bgCard,
@@ -439,6 +577,10 @@ const styles = StyleSheet.create({
   body: {
     ...typography.body,
     color: colors.textMuted,
+  },
+  decoded: {
+    ...typography.caption,
+    color: colors.textDim,
   },
   kv: {
     flexDirection: "row",

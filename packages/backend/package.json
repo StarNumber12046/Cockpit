@@ -19,6 +19,8 @@
     "clean": "rimraf .turbo"
   },
   "dependencies": {
+    "@ai-sdk/groq": "^4.0.6",
+    "ai": "^7.0.18",
     "convex": "^1.24.8"
   },
   "devDependencies": {
