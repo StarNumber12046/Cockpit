@@ -1,0 +1,27 @@
+{
+  "name": "@cockpit/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./api": "./convex/_generated/api.js",
+    "./dataModel": "./convex/_generated/dataModel.d.ts"
+  },
+  "scripts": {
+    "dev": "convex dev",
+    "dev:local": "convex deployment select local && convex dev",
+    "setup": "convex dev --once --configure=new --dev-deployment cloud",
+    "use:cloud": "convex deployment select dev",
+    "use:local": "convex deployment select local",
+    "seed": "convex run seed:populate",
+    "dashboard": "convex dashboard",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf .turbo"
+  },
+  "dependencies": {
+    "convex": "^1.24.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "cockpit",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.11.0",
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "dev:mobile": "pnpm --filter @cockpit/mobile dev",
+    "dev:backend": "pnpm --filter @cockpit/backend dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean && rimraf node_modules",
+    "convex:login": "pnpm --filter @cockpit/backend exec convex login --force",
+    "convex:setup": "pnpm --filter @cockpit/backend setup",
+    "convex:seed": "pnpm --filter @cockpit/backend seed",
+    "sync:convex-url": "node scripts/sync-convex-url.mjs"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.4",
+    "typescript": "^5.8.3",
+    "rimraf": "^6.0.1"
+  }
+}

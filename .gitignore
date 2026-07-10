@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build / turbo
+dist/
+.turbo/
+.expo/
+web-build/
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+.env.*.local
+!.env.example
+apps/mobile/.env
+
+# Convex (local backends + secrets)
+packages/backend/.env.local
+packages/backend/.convex/
+# Keep checked-in stubs; real codegen overwrites them after `convex dev`.
+# packages/backend/convex/_generated/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# Logs / debug
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Testing / coverage
+coverage/
+
+# Native
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+mcps

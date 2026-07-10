@@ -1,0 +1,9 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+allowBuilds:
+  esbuild: true
+
+# Hoisted linker is safer for React Native / Expo native module resolution.
+nodeLinker: hoisted
