@@ -9,10 +9,14 @@ concurrency:
   group: eas-preview-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
-  build:
-    name: Preview internal distribution
+  release:
+    name: Preview build and GitHub Release
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     env:
       EXPO_PUBLIC_CONVEX_URL: ${{ secrets.EXPO_PUBLIC_CONVEX_URL }}
       EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
@@ -46,13 +50,13 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Build preview on EAS (internal distribution)
-        working-directory: apps/mobile
-        run: |
-          eas build \
-            --profile preview \
-            --platform android \
-            --non-interactive \
-            --no-wait \
-            --refresh-ad-hoc-provisioning-profile \
-            --message "Release ${GITHUB_REF_NAME}"
+      - name: Build on EAS and download artifacts
+        run: node scripts/eas-github-release.mjs
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Cockpit ${{ github.ref_name }}
+          prerelease: true
+          body_path: apps/mobile/release-assets/release-notes.md
+          files: apps/mobile/release-assets/*.apk
