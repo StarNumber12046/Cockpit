@@ -51,3 +51,9 @@ coverage/
 
 mcps
 terminals
+
+# Agent tooling (install via `npx convex ai-files install`)
+.agents/
+.claude/
+skills-lock.json
+.plans/

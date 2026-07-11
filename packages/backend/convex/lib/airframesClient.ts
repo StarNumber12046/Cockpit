@@ -13,7 +13,7 @@ export const AIRFRAMES_BASE = "https://api.airframes.io/v1";
 
 export const AIRFRAMES_HEADERS: Record<string, string> = {
   accept: "application/json",
-  "user-agent": "Cockpit/0.1 (educational; +https://github.com/local/cockpit)",
+  "user-agent": "Cockpit/0.1 (educational; +https://github.com/StarNumber12046/Cockpit)",
   // Browser-like origin helps avoid occasional edge 404s on this API.
   origin: "https://app.airframes.io",
   referer: "https://app.airframes.io/",

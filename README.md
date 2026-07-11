@@ -110,6 +110,17 @@ After switching, run `pnpm sync:convex-url` so Expo points at the same deploymen
 
 Unofficial educational FR24 access. Commercial use requires [business@fr24.com](mailto:business@fr24.com) / [official FR24 API](https://fr24api.flightradar24.com/).
 
+## License
+
+[MIT](LICENSE) — see [LICENSE](LICENSE) for details.
+
+## Contributing
+
+1. Fork the repo and open a PR against `master`.
+2. Run `pnpm install`, `pnpm typecheck`, and test your changes locally.
+3. Do not commit secrets — use Convex env vars (`GROQ_API_KEY`, etc.) and local `.env` files (see `.env.example` files).
+4. Optional: install Convex agent skills with `npx convex ai-files install` (not checked into the repo).
+
 ## Packages
 
 | Package | Scripts |
