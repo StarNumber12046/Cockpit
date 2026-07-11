@@ -2,6 +2,7 @@
   "expo": {
     "name": "Cockpit",
     "slug": "cockpit",
+    "owner": "starnumber12046",
     "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "cockpit",
@@ -53,7 +54,7 @@
         "expo-font",
         {
           "fonts": [
-            "node_modules/react-native-vector-icons/Fonts/FontAwesome.ttf",
+            "./assets/fonts/FontAwesome.ttf",
             "./assets/fonts/RobotoFlex.ttf"
           ]
         }
@@ -62,6 +63,14 @@
     "experiments": {
       "typedRoutes": true,
       "autolinkingModuleResolution": true
+    },
+    "extra": {
+      "router": {
+        "sitemap": false
+      },
+      "eas": {
+        "projectId": "9fc9eaf5-fdc2-41db-9956-98d55cfccdfb"
+      }
     }
   }
 }

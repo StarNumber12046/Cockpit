@@ -1,0 +1,58 @@
+name: EAS Preview Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: eas-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Preview internal distribution
+    runs-on: ubuntu-latest
+    env:
+      EXPO_PUBLIC_CONVEX_URL: ${{ secrets.EXPO_PUBLIC_CONVEX_URL }}
+      EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve release version from tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build preview on EAS (internal distribution)
+        working-directory: apps/mobile
+        run: |
+          eas build \
+            --profile preview \
+            --platform android \
+            --non-interactive \
+            --no-wait \
+            --refresh-ad-hoc-provisioning-profile \
+            --message "Release ${GITHUB_REF_NAME}"

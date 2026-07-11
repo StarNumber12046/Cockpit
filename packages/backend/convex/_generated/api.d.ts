@@ -18,9 +18,11 @@ import type * as lib_airframesClient from "../lib/airframesClient.js";
 import type * as lib_alertCreate from "../lib/alertCreate.js";
 import type * as lib_correlation from "../lib/correlation.js";
 import type * as lib_flightSession from "../lib/flightSession.js";
+import type * as lib_fr24SquawkCheck from "../lib/fr24SquawkCheck.js";
 import type * as lib_llmStream from "../lib/llmStream.js";
 import type * as lib_squawkVerify from "../lib/squawkVerify.js";
 import type * as seed from "../seed.js";
+import type * as squawkReports from "../squawkReports.js";
 import type * as tracked from "../tracked.js";
 import type * as trackedPoll from "../trackedPoll.js";
 
@@ -41,9 +43,11 @@ declare const fullApi: ApiFromModules<{
   "lib/alertCreate": typeof lib_alertCreate;
   "lib/correlation": typeof lib_correlation;
   "lib/flightSession": typeof lib_flightSession;
+  "lib/fr24SquawkCheck": typeof lib_fr24SquawkCheck;
   "lib/llmStream": typeof lib_llmStream;
   "lib/squawkVerify": typeof lib_squawkVerify;
   seed: typeof seed;
+  squawkReports: typeof squawkReports;
   tracked: typeof tracked;
   trackedPoll: typeof trackedPoll;
 }>;

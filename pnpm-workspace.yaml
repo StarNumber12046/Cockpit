@@ -3,6 +3,7 @@ packages:
   - "packages/*"
 
 allowBuilds:
+  dtrace-provider: false
   esbuild: true
 
 # Hoisted linker is safer for React Native / Expo native module resolution.

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useQuery } from "convex/react";
 import { isEmergencySquawk } from "@cockpit/shared";
 import type { Fr24Flight } from "@cockpit/fr24";
@@ -9,11 +9,20 @@ import { LoadingState } from "./LoadingState";
 import { EmptyState } from "./EmptyState";
 import { colors, radius, spacing, typography } from "../constants/theme";
 
-type Props = {
-  flights?: Fr24Flight[];
+type AlertDoc = NonNullable<ReturnType<typeof useQuery<typeof api.alerts.list>>>[number];
+
+type OpenFlightItem = {
+  fr24Id?: string;
+  callsign?: string;
+  flightNumber?: string;
 };
 
-export function AlertsPanel({ flights = [] }: Props) {
+type Props = {
+  flights?: Fr24Flight[];
+  onOpenFlight?: (item: OpenFlightItem) => void;
+};
+
+export function AlertsPanel({ flights = [], onOpenFlight }: Props) {
   const alerts = useQuery(api.alerts.list, { limit: 50 });
 
   const liveSquawks = useMemo(
@@ -39,11 +48,20 @@ export function AlertsPanel({ flights = [] }: Props) {
           <Text style={styles.section}>Live emergency squawks</Text>
           <View style={styles.chips}>
             {liveSquawks.map((s) => (
-              <View key={s.id} style={styles.squawkChip}>
+              <Pressable
+                key={s.id}
+                style={styles.squawkChip}
+                onPress={() =>
+                  onOpenFlight?.({
+                    fr24Id: s.id,
+                    callsign: s.callsign,
+                  })
+                }
+              >
                 <Text style={styles.squawkText}>
                   {s.callsign} · {s.squawk}
                 </Text>
-              </View>
+              </Pressable>
             ))}
           </View>
         </View>
@@ -57,25 +75,53 @@ export function AlertsPanel({ flights = [] }: Props) {
         />
       ) : (
         alerts.map((item) => (
-          <View key={item._id} style={styles.card}>
-            <View style={styles.cardTop}>
-              <Text style={styles.title} numberOfLines={2}>
-                {item.title}
-              </Text>
-              <SeverityChip severity={item.severity} />
-            </View>
-            <Text style={styles.body}>{item.body}</Text>
-            <Text style={styles.meta}>
-              {item.type}
-              {item.callsign ? ` · ${item.callsign}` : ""}
-              {item.flightNumber ? ` · ${item.flightNumber}` : ""}
-              {" · "}
-              {new Date(item.createdAt).toLocaleString()}
-            </Text>
-          </View>
+          <AlertCard
+            key={item._id}
+            item={item}
+            onPress={() =>
+              onOpenFlight?.({
+                fr24Id: item.fr24Id,
+                callsign: item.callsign,
+                flightNumber: item.flightNumber,
+              })
+            }
+          />
         ))
       )}
     </View>
+  );
+}
+
+function AlertCard({
+  item,
+  onPress,
+}: {
+  item: AlertDoc;
+  onPress: () => void;
+}) {
+  const canOpen = Boolean(item.fr24Id);
+
+  return (
+    <Pressable
+      style={[styles.card, !canOpen && styles.cardDisabled]}
+      onPress={onPress}
+      disabled={!canOpen}
+    >
+      <View style={styles.cardTop}>
+        <Text style={styles.title} numberOfLines={2}>
+          {item.title}
+        </Text>
+        <SeverityChip severity={item.severity} />
+      </View>
+      <Text style={styles.body}>{item.body}</Text>
+      <Text style={styles.meta}>
+        {item.type}
+        {item.callsign ? ` · ${item.callsign}` : ""}
+        {item.flightNumber ? ` · ${item.flightNumber}` : ""}
+        {" · "}
+        {new Date(item.createdAt).toLocaleString()}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -118,6 +164,9 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: spacing.md,
     gap: spacing.sm,
+  },
+  cardDisabled: {
+    opacity: 0.72,
   },
   cardTop: {
     flexDirection: "row",

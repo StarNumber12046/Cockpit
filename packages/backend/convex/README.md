@@ -47,6 +47,8 @@ npx convex run seed:populate
 | `acarsExplain.getForMessage` | Subscribe to explanation (partial while streaming) |
 | `alerts.list` | Global alert feed |
 | `alerts.listForFlight` | Per-flight alerts |
+| `alerts.reportSquawks` | Client emergency squawk reports → server FR24 verify → global alert |
+| `alerts.reportSquawkClearances` | Client clearance reports → server FR24 verify → remove squawk alerts |
 | `tracked.list` / `tracked.add` / `tracked.remove` | Track my flight |
 | `seed.populate` | Demo ACARS + alerts |
 

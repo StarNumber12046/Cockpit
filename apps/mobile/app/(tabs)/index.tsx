@@ -253,10 +253,11 @@ export default function HomeScreen() {
   const onOpenTrackedFlight = (item: {
     fr24Id?: string;
     callsign?: string;
-    flightNumber: string;
+    flightNumber?: string;
   }) => {
     if (!item.fr24Id) return;
     setTrackedOpen(false);
+    setAlertsOpen(false);
     const onMap = flights.find((f) => f.fr24Id === item.fr24Id);
     if (onMap) {
       setSelected(onMap);
@@ -265,7 +266,7 @@ export default function HomeScreen() {
       return;
     }
     setOffMapFlightId(item.fr24Id);
-    setOffMapFlightNumber(item.flightNumber);
+    setOffMapFlightNumber(item.flightNumber ?? "");
     setOffMapCallsign(item.callsign ?? "");
   };
 
@@ -336,7 +337,7 @@ export default function HomeScreen() {
         title="Alerts"
         onClose={() => setAlertsOpen(false)}
       >
-        <AlertsPanel flights={flights} />
+        <AlertsPanel flights={flights} onOpenFlight={onOpenTrackedFlight} />
       </ChromeSheet>
 
       <ChromeSheet

@@ -14,7 +14,8 @@
     "convex:login": "pnpm --filter @cockpit/backend exec convex login --force",
     "convex:setup": "pnpm --filter @cockpit/backend setup",
     "convex:seed": "pnpm --filter @cockpit/backend seed",
-    "sync:convex-url": "node scripts/sync-convex-url.mjs"
+    "sync:convex-url": "node scripts/sync-convex-url.mjs",
+    "eas": "pnpm --filter @cockpit/mobile eas"
   },
   "devDependencies": {
     "rimraf": "^6.0.1",
