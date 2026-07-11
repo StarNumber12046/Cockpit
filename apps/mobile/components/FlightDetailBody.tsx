@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Image,
+  Linking,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useAction, useMutation, useQuery } from "convex/react";
 import type { Fr24FlightDetails } from "@cockpit/fr24";
 import type { Fr24Flight } from "@cockpit/fr24";
@@ -11,6 +18,11 @@ import {
   type CorrelationKeys,
 } from "@cockpit/shared";
 import { api } from "../lib/convex";
+import {
+  photoFromFr24Detail,
+  resolveAircraftPhoto,
+  type AircraftPhoto,
+} from "../lib/media";
 import { LoadingState } from "./LoadingState";
 import { EmptyState } from "./EmptyState";
 import { ErrorBanner } from "./ErrorBanner";
@@ -64,6 +76,13 @@ export function FlightDetailBody({
   const [acarsLiveError, setAcarsLiveError] = useState<string | null>(null);
   const [acarsLiveMeta, setAcarsLiveMeta] = useState<string | null>(null);
   const autoFetchKey = useRef<string | null>(null);
+
+  const [aircraftPhoto, setAircraftPhoto] = useState<AircraftPhoto | null>(null);
+  const [photoLoading, setPhotoLoading] = useState(false);
+  const photoFetchKey = useRef<string | null>(null);
+
+  const registration =
+    detail?.aircraft?.registration || flight.registration || null;
 
   const canFetchAcars = Boolean(
     keys.icao24 || keys.callsign || keys.flightNumber,
@@ -147,6 +166,42 @@ export function FlightDetailBody({
     void pullLiveAcars();
   }, [canFetchAcars, keys, pullLiveAcars]);
 
+  useEffect(() => {
+    const cacheKey = `${keys.icao24 ?? ""}|${registration ?? ""}|${detail ? "1" : "0"}`;
+    if (photoFetchKey.current === cacheKey) return;
+    photoFetchKey.current = cacheKey;
+
+    const fromDetail = photoFromFr24Detail(detail);
+    if (fromDetail) {
+      setAircraftPhoto(fromDetail);
+      setPhotoLoading(false);
+      return;
+    }
+
+    if (!keys.icao24 && !registration) {
+      setAircraftPhoto(null);
+      setPhotoLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setAircraftPhoto(null);
+    setPhotoLoading(true);
+    void resolveAircraftPhoto({
+      detail,
+      icao24: keys.icao24,
+      registration,
+    }).then((photo) => {
+      if (cancelled) return;
+      setAircraftPhoto(photo);
+      setPhotoLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detail, keys.icao24, registration]);
+
   const trailLen = detail?.trail?.length ?? 0;
 
   return (
@@ -191,6 +246,12 @@ export function FlightDetailBody({
           </View>
         </View>
       )}
+
+      {photoLoading && !aircraftPhoto ? (
+        <View style={styles.photoSkeleton} accessibilityLabel="Loading aircraft photo" />
+      ) : aircraftPhoto ? (
+        <AircraftPhotoCard photo={aircraftPhoto} />
+      ) : null}
 
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -237,6 +298,42 @@ export function FlightDetailBody({
           ))
         )}
       </View>
+    </View>
+  );
+}
+
+function AircraftPhotoCard({ photo }: { photo: AircraftPhoto }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) return null;
+
+  const credit = photo.photographer ? `© ${photo.photographer}` : null;
+
+  return (
+    <View style={styles.photoWrap}>
+      <Image
+        source={{ uri: photo.uri }}
+        style={styles.photo}
+        resizeMode="cover"
+        onError={() => setFailed(true)}
+        accessibilityLabel="Aircraft photo"
+      />
+      {credit ? (
+        photo.link ? (
+          <Pressable
+            onPress={() => void Linking.openURL(photo.link!)}
+            hitSlop={6}
+          >
+            <Text style={styles.photoCredit} numberOfLines={1}>
+              {credit}
+            </Text>
+          </Pressable>
+        ) : (
+          <Text style={styles.photoCredit} numberOfLines={1}>
+            {credit}
+          </Text>
+        )
+      ) : null}
     </View>
   );
 }
@@ -309,6 +406,33 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.danger,
     flex: 1,
+  },
+  photoWrap: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: "hidden",
+    backgroundColor: colors.bgCard,
+    gap: spacing.xs,
+  },
+  photo: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+    backgroundColor: colors.bgCard,
+  },
+  photoSkeleton: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bgCard,
+  },
+  photoCredit: {
+    ...typography.caption,
+    color: colors.textDim,
+    paddingHorizontal: spacing.sm,
+    paddingBottom: spacing.sm,
   },
   card: {
     backgroundColor: colors.bgCard,

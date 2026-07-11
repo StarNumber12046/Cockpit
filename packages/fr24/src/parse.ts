@@ -38,6 +38,37 @@ function asBool(value: unknown): boolean {
   return false;
 }
 
+function readRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function readAlt(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value.replace(/,/g, ""));
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function parseAltitudeFromText(text: string): number | undefined {
+  const fl = text.match(/\bFL\s*0*(\d{2,3})\b/i);
+  if (fl) return Number(fl[1]) * 100;
+  const ft = text.match(/(\d{1,3}(?:,\d{3})*)\s*ft\b/i);
+  if (ft) return Number(ft[1]!.replace(/,/g, ""));
+  return undefined;
+}
+
+function readCoord(
+  primary: unknown,
+  alternate: unknown,
+): number | undefined {
+  if (typeof primary === "number" && Number.isFinite(primary)) return primary;
+  if (typeof alternate === "number" && Number.isFinite(alternate)) return alternate;
+  return undefined;
+}
+
 /** FR24 feed object keys that are flights start with a digit. */
 export function isFlightId(id: string): boolean {
   return id.length > 0 && id[0]! >= "0" && id[0]! <= "9";
@@ -93,25 +124,82 @@ export function parseDetailsResponse(content: unknown): Fr24FlightDetails {
 
 function mapSearchItem(raw: Record<string, unknown>, fallbackType: string): Fr24SearchResultItem {
   const id = asString(raw.id ?? raw.iata ?? raw.icao ?? raw.hex ?? "");
-  const label = asString(
-    raw.label ?? raw.name ?? raw.callsign ?? raw.detail?.toString() ?? id,
-  );
   const type = asString(raw.type ?? fallbackType);
-  const detail = asString(raw.detail ?? raw.description ?? "");
+  const isLive = type === "live" || fallbackType === "live";
+  const detailRec = readRecord(raw.detail);
+  const name = asString(raw.name);
+
+  const label = isLive
+    ? asString(
+        raw.label ??
+          detailRec?.callsign ??
+          raw.callsign ??
+          detailRec?.flight ??
+          id,
+      )
+    : asString(raw.label ?? raw.name ?? raw.callsign ?? id);
+
+  const detailText =
+    typeof raw.detail === "string"
+      ? raw.detail
+      : typeof raw.description === "string"
+        ? raw.description
+        : "";
 
   const item: Fr24SearchResultItem = {
     id: id || label,
     label: label || id,
     type,
-    detail: detail || undefined,
+    detail: detailText || undefined,
     raw,
   };
 
-  if (raw.id != null && type === "live") {
+  if (raw.id != null && isLive) {
     item.fr24Id = asString(raw.id);
   }
-  if (typeof raw.lat === "number") item.lat = raw.lat;
-  if (typeof raw.lon === "number") item.lon = raw.lon;
+
+  if (isLive) {
+    item.callsign =
+      asString(detailRec?.callsign ?? raw.callsign ?? label) || undefined;
+    item.flightNumber =
+      asString(detailRec?.flight ?? raw.flight) || undefined;
+    item.airline = name || undefined;
+    item.airlineIata = asString(detailRec?.iata ?? raw.iata) || undefined;
+    item.airlineIcao = asString(raw.icao ?? detailRec?.icao) || undefined;
+
+    const alt = readAlt(
+      detailRec?.alt ??
+        detailRec?.altitude ??
+        raw.alt ??
+        raw.altitude,
+    );
+    if (alt != null) item.altitude = alt;
+
+    if (detailText) {
+      if (!item.airline) {
+        const parts = detailText.split("·").map((s) => s.trim());
+        const candidate = parts[0];
+        if (candidate && !candidate.includes("→")) {
+          item.airline = candidate;
+        }
+      }
+      if (item.altitude == null) {
+        const parsedAlt = parseAltitudeFromText(detailText);
+        if (parsedAlt != null) item.altitude = parsedAlt;
+      }
+    }
+  }
+
+  const lat = readCoord(
+    detailRec?.lat ?? raw.lat,
+    raw.latitude,
+  );
+  const lon = readCoord(
+    detailRec?.lon ?? raw.lon,
+    raw.longitude,
+  );
+  if (lat != null) item.lat = lat;
+  if (lon != null) item.lon = lon;
 
   return item;
 }

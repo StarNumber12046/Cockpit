@@ -3,7 +3,6 @@ import {
   Animated,
   Dimensions,
   Easing,
-  Image,
   PanResponder,
   Pressable,
   ScrollView,
@@ -25,8 +24,10 @@ import {
 } from "@cockpit/shared";
 import { colors, radius, spacing, typography } from "../constants/theme";
 import { api } from "../lib/convex";
-import { airlineLogoCandidates } from "../lib/media";
+import { AirlineLogo } from "./AirlineLogo";
+import { normalizeTrailPoints } from "../lib/altitudeColor";
 import { lastMinuteSeries } from "../lib/trailMetrics";
+import { isValidMapCoordinate } from "./AircraftMarker";
 import { useFr24Detail } from "../hooks/useFr24Detail";
 import { FaIcon } from "./FaIcon";
 import { FlightDetailBody } from "./FlightDetailBody";
@@ -155,7 +156,12 @@ export function FlightSheet({
   const offMapSkeleton = useMemo((): Fr24Flight | null => {
     if (flight || !offMapFlightId || !resolvedDetail) return null;
     const d = resolvedDetail;
-    const lastTrail = d.trail?.[d.trail.length - 1];
+    const trailPoints = normalizeTrailPoints(
+      d.trail as unknown[] | undefined,
+    );
+    const current = trailPoints?.length
+      ? trailPoints[trailPoints.length - 1]
+      : null;
     const origin =
       d.airport?.origin?.code?.iata ?? d.airport?.origin?.code?.icao ?? "";
     const dest =
@@ -173,15 +179,15 @@ export function FlightSheet({
       aircraftCode: d.aircraft?.model?.code || "",
       originAirportIata: origin,
       destinationAirportIata: dest,
-      altitude: lastTrail?.alt ?? 0,
-      groundSpeed: lastTrail?.spd ?? 0,
+      altitude: current?.alt ?? 0,
+      groundSpeed: 0,
       verticalSpeed: 0,
-      heading: lastTrail?.hd ?? 0,
-      time: lastTrail?.ts ?? 0,
+      heading: 0,
+      time: current?.ts ?? 0,
       onGround: false,
       squawk: "",
-      latitude: lastTrail?.lat ?? 0,
-      longitude: lastTrail?.lng ?? 0,
+      latitude: current?.lat ?? 0,
+      longitude: current?.lng ?? 0,
     };
   }, [flight, offMapFlightId, offMapCallsign, offMapFlightNumber, resolvedDetail]);
 
@@ -191,7 +197,7 @@ export function FlightSheet({
   useEffect(() => {
     if (!flight && offMapSkeleton && onOffMapLocationReady) {
       const { latitude, longitude } = offMapSkeleton;
-      if (latitude && longitude) {
+      if (isValidMapCoordinate(latitude, longitude)) {
         onOffMapLocationReady(latitude, longitude);
       }
     }
@@ -306,17 +312,6 @@ export function FlightSheet({
   const origin = display?.originAirportIata?.trim().toUpperCase() || "???";
   const destination =
     display?.destinationAirportIata?.trim().toUpperCase() || "???";
-  const airlineHint =
-    display?.airlineIcao?.trim().toUpperCase() ||
-    label.slice(0, 3).toUpperCase();
-  const logoUris = display
-    ? airlineLogoCandidates({
-        airlineIcao: display.airlineIcao,
-        flightNumber: display.flightNumber,
-        callsign: display.callsign,
-      })
-    : [];
-
   const trackedEntry = useMemo(() => {
     if (!tracked || !display) return null;
     const flightNumber = (display.flightNumber || label)
@@ -521,10 +516,16 @@ export function FlightSheet({
           <View style={styles.peekBlock}>
             <View style={styles.topRow}>
               <View style={styles.identity}>
-                <AirlineBadge
-                  logoUris={logoUris}
-                  fallback={airlineHint.slice(0, 3)}
+                <AirlineLogo
+                  flight={display}
+                  detail={resolvedDetail}
+                  size={44}
+                  borderRadius={radius.md}
+                  chipBackground="#F4F7FC"
+                  chipStyle={styles.badgeChip}
                   emergency={emergency}
+                  emergencyStyle={styles.badgeHot}
+                  remountKey={openGeneration}
                 />
                 <View style={styles.idText}>
                   <View style={styles.titleRow}>
@@ -640,10 +641,6 @@ export function FlightSheet({
   );
 }
 
-/**
- * Airline logo badge. Tries multiple CDN URLs (gstatic → kiwi → avs → FR24)
- * because FR24 operator assets 403 Android's default okhttp User-Agent.
- */
 function RouteArrow() {
   return (
     <Svg width={16} height={16} viewBox="0 0 24 24">
@@ -656,48 +653,6 @@ function RouteArrow() {
         strokeLinejoin="round"
       />
     </Svg>
-  );
-}
-
-function AirlineBadge({
-  logoUris,
-  fallback,
-  emergency,
-}: {
-  logoUris: string[];
-  fallback: string;
-  emergency: boolean;
-}) {
-  const [uriIndex, setUriIndex] = useState(0);
-  const key = logoUris.join("|");
-
-  useEffect(() => {
-    setUriIndex(0);
-  }, [key]);
-
-  const logoUri = logoUris[uriIndex] ?? null;
-  const showLogo = Boolean(logoUri);
-
-  return (
-    <View style={[styles.badge, emergency ? styles.badgeHot : null]}>
-      {showLogo ? (
-        <Image
-          source={{ uri: logoUri! }}
-          style={styles.badgeLogo}
-          resizeMode="contain"
-          onError={() => {
-            setUriIndex((i) => {
-              // Exhaust candidates → show text fallback.
-              if (i + 1 < logoUris.length) return i + 1;
-              return logoUris.length; // past end → showLogo false
-            });
-          }}
-          accessibilityLabel={`${fallback} airline logo`}
-        />
-      ) : (
-        <Text style={styles.badgeText}>{fallback}</Text>
-      )}
-    </View>
   );
 }
 
@@ -771,32 +726,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  badge: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md + 2,
-    // Light plate so multi-color airline logos stay legible on dark UI.
-    backgroundColor: "#F4F7FC",
+  badgeChip: {
     borderWidth: 1,
     borderColor: colors.border,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
     padding: 5,
   },
   badgeHot: {
-    borderColor: colors.danger,
     borderWidth: 2,
-  },
-  badgeLogo: {
-    width: "100%",
-    height: "100%",
-  },
-  badgeText: {
-    color: colors.bg,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.4,
+    borderColor: colors.danger,
   },
   idText: {
     flex: 1,

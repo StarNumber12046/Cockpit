@@ -60,6 +60,15 @@ export type Fr24SearchResultItem = {
   detail?: string;
   /** Present for live flight hits when available. */
   fr24Id?: string;
+  /** Live hit callsign when FR24 provides it separately from label. */
+  callsign?: string;
+  /** Marketing / flight number (e.g. UA698). */
+  flightNumber?: string;
+  /** Operator display name from search (e.g. United Airlines). */
+  airline?: string;
+  airlineIcao?: string;
+  airlineIata?: string;
+  altitude?: number;
   lat?: number;
   lon?: number;
   raw?: unknown;
@@ -100,7 +109,15 @@ export type Fr24FlightDetails = Record<string, unknown> & {
       large?: Fr24AircraftImage[];
     };
   };
-  airline?: { name?: string; short?: string; code?: { iata?: string; icao?: string } };
+  airline?: {
+    name?: string;
+    short?: string;
+    /** e.g. "/data/airlines/lw-lda" */
+    url?: string;
+    /** FR24 CDN logotype numeric id when clickhandler includes it. */
+    id?: number | string;
+    code?: { iata?: string; icao?: string };
+  };
   airport?: {
     origin?: AirportDetail;
     destination?: AirportDetail;

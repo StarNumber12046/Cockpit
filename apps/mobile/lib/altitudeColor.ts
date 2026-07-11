@@ -176,6 +176,49 @@ export function trailWithLivePosition(
 }
 
 /**
+ * Advance a trail toward a live aircraft fix. Updates the tip in place for
+ * small moves; appends a breadcrumb once the aircraft has traveled far enough
+ * that a rubber-band segment would look visibly stretched.
+ */
+export function appendLiveTrailStep(
+  points: TrailPointLike[],
+  live: { lat: number; lng: number; alt?: number | null },
+  opts?: { minStepM?: number; minMoveM?: number },
+): { points: TrailPointLike[]; changed: boolean } {
+  const minStepM = opts?.minStepM ?? 350;
+  const minMoveM = opts?.minMoveM ?? 3;
+
+  if (points.length === 0) {
+    return {
+      points: [{ lat: live.lat, lng: live.lng, alt: live.alt }],
+      changed: true,
+    };
+  }
+
+  const last = points[points.length - 1]!;
+  const dist = haversineM(last, live);
+  if (dist < minMoveM) {
+    return { points, changed: false };
+  }
+
+  if (dist < minStepM) {
+    const out = points.slice();
+    out[out.length - 1] = {
+      ...last,
+      lat: live.lat,
+      lng: live.lng,
+      alt: live.alt ?? last.alt,
+    };
+    return { points: out, changed: true };
+  }
+
+  return {
+    points: [...points, { lat: live.lat, lng: live.lng, alt: live.alt }],
+    changed: true,
+  };
+}
+
+/**
  * Build map polylines from a trail. Adjacent segments that share the same
  * color band are merged so we don't spawn one Polyline per edge.
  * Large position jumps are not connected (avoids airport→aircraft lines).

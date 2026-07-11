@@ -1,14 +1,36 @@
 /**
  * External media helpers for airline logos and aircraft photos.
  *
- * Logos: prefer IATA-keyed CDNs that allow React Native's default User-Agent
- * (okhttp on Android). FR24 operator assets 403 okhttp, so they are last resort.
+ * Logos: plckr/flightradar-flight-card flightaware_logos (ICAO PNGs) first, then
+ * Kiwi/Aviasales, FR24 CDN logotypes, legacy FR24 operator assets.
  * Photos: FR24 detail payload when present, else Planespotters public API.
  */
 
 /** Planespotters requires a contactable User-Agent. */
 const PLANESPOTTERS_UA =
   "Cockpit/1.0 (+https://github.com/xai-org/Cockpit; educational)";
+
+const FR24_CDN = "https://cdn.flightradar24.com";
+
+/** ICAO-keyed airline logos from plckr/flightradar-flight-card (FlightAware artwork). */
+const FLIGHTAWARE_LOGOS_BASE =
+  "https://raw.githubusercontent.com/plckr/flightradar-flight-card/main/public/flightaware_logos";
+
+/** Headers required for FR24 CDN images (okhttp alone gets 403). */
+export const FR24_IMAGE_HEADERS: Record<string, string> = {
+  accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9",
+  origin: "https://www.flightradar24.com",
+  referer: "https://www.flightradar24.com/",
+  "user-agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+};
+
+export type AirlineLogoSource = {
+  uri: string;
+  /** Present for flightradar24.com / cdn.flightradar24.com assets. */
+  headers?: Record<string, string>;
+};
 
 /**
  * Common ICAO → IATA when flight number has no designator.
@@ -36,6 +58,7 @@ const ICAO_TO_IATA: Record<string, string> = {
   EZY: "U2",
   EJU: "EC",
   RYR: "FR",
+  LDA: "LW",
   AFR: "AF",
   DLH: "LH",
   SWR: "LX",
@@ -74,6 +97,7 @@ const ICAO_TO_IATA: Record<string, string> = {
   ICE: "FI",
   FIN: "AY",
   NAX: "DY",
+  NOZ: "DY",
   AZA: "AZ",
   AEE: "A3",
   LOT: "LO",
@@ -98,10 +122,12 @@ export type AircraftPhoto = {
 };
 
 export type AirlineIdentity = {
+  /** FR24 feed `airlineIcao` or detail `airline.code.icao`. */
   airlineIcao?: string | null;
+  /** FR24 detail `airline.code.iata` when available. */
   airlineIata?: string | null;
+  /** FR24 flight number (e.g. UA698) — used for IATA designator only. */
   flightNumber?: string | null;
-  callsign?: string | null;
 };
 
 /** IATA designator from a flight number like UA698, 5X582, 3U8801. */
@@ -121,62 +147,177 @@ export function resolveAirlineIata(id: AirlineIdentity): string | null {
     return fromExplicit;
   }
 
+  const icao = id.airlineIcao?.trim().toUpperCase() || null;
+  if (icao && ICAO_TO_IATA[icao]) return ICAO_TO_IATA[icao];
+
+  // Flight number designator is a weak signal (codeshares, group marketing).
   const fromFn = airlineIataFromFlightNumber(id.flightNumber);
   if (fromFn) return fromFn;
 
-  const icao =
-    id.airlineIcao?.trim().toUpperCase() ||
-    id.callsign?.trim().toUpperCase().match(/^([A-Z]{3})/)?.[1] ||
-    null;
-  if (icao && ICAO_TO_IATA[icao]) return ICAO_TO_IATA[icao];
-
   return null;
+}
+
+type Fr24AirlineDetail = {
+  airline?: {
+    id?: number | string;
+    url?: string;
+    code?: { iata?: string; icao?: string };
+  };
+};
+
+const FR24_LOGOTYPE_URL_RE =
+  /(?:https:\/\/cdn\.flightradar24\.com)?\/assets\/airlines\/logotypes\/(\d+)\.png(?:\?[^\s"'<>]*)?/i;
+
+/** FR24 CDN logotypes referenced explicitly in clickhandler strings (not bare airline.id). */
+export function fr24LogotypeSourcesFromAirline(
+  detail: unknown,
+): AirlineLogoSource[] {
+  const sources: AirlineLogoSource[] = [];
+  const seen = new Set<string>();
+
+  const pushUri = (uri: string) => {
+    const clean = uri.startsWith("http") ? uri : `${FR24_CDN}${uri}`;
+    if (seen.has(clean)) return;
+    seen.add(clean);
+    sources.push({ uri: clean, headers: FR24_IMAGE_HEADERS });
+  };
+
+  const scanString = (value: string) => {
+    const m = value.match(FR24_LOGOTYPE_URL_RE);
+    if (!m) return;
+    const id = m[1];
+    pushUri(`/assets/airlines/logotypes/${id}.png`);
+  };
+
+  const walk = (node: unknown) => {
+    if (node == null) return;
+    if (typeof node === "string") {
+      scanString(node);
+      return;
+    }
+    if (typeof node !== "object") return;
+    for (const v of Object.values(node as Record<string, unknown>)) {
+      walk(v);
+    }
+  };
+
+  walk(detail);
+  return sources;
+}
+
+function fr24LogoSource(path: string): AirlineLogoSource {
+  return {
+    uri: `${FR24_CDN}${path}`,
+    headers: FR24_IMAGE_HEADERS,
+  };
+}
+
+function flightawareLogoSource(icao: string): AirlineLogoSource {
+  return {
+    uri: `${FLIGHTAWARE_LOGOS_BASE}/${encodeURIComponent(icao)}.png`,
+  };
+}
+
+type Fr24FlightAirlineFields = {
+  airlineIcao?: string | null;
+  flightNumber?: string | null;
+};
+
+/** Merge FR24 feed operator with clickhandler airline (detail wins). */
+export function airlineIdentityFromFr24(
+  flight: Fr24FlightAirlineFields,
+  detail?: Fr24AirlineDetail | null,
+): AirlineIdentity {
+  const detailIcao = detail?.airline?.code?.icao?.trim().toUpperCase();
+  const detailIata = detail?.airline?.code?.iata?.trim().toUpperCase();
+  const feedIcao = flight.airlineIcao?.trim().toUpperCase();
+
+  return {
+    airlineIcao: detailIcao || feedIcao || undefined,
+    airlineIata: detailIata || undefined,
+    flightNumber: flight.flightNumber,
+  };
+}
+
+/** Stable key for logo candidate lists (uri + FR24 header flag). */
+export function airlineLogoSourceKey(sources: AirlineLogoSource[]): string {
+  return sources
+    .map((s) => `${s.uri}${s.headers ? ":fr24" : ""}`)
+    .join("|");
 }
 
 /** Best-effort ICAO airline code. */
 export function resolveAirlineIcao(id: AirlineIdentity): string | null {
   const direct = id.airlineIcao?.trim().toUpperCase();
   if (direct && direct.length >= 2) return direct;
-  const fromCs = id.callsign?.trim().toUpperCase().match(/^([A-Z]{3})\d/);
-  return fromCs?.[1] ?? null;
+  return null;
+}
+
+/** Text fallback when no remote logo loads. */
+export function resolveAirlineChip(id: AirlineIdentity): string {
+  const iata = resolveAirlineIata(id);
+  if (iata) return iata;
+  const icao = resolveAirlineIcao(id);
+  if (icao) return icao.slice(0, 3);
+  return "??";
 }
 
 /**
- * Ordered logo URL candidates. Prefer CDNs that accept RN/Android okhttp UA.
- * FR24 operator logos are last — they work on iOS but 403 Android Image loads.
+ * Ordered logo candidates. flightaware_logos (ICAO) first, then Kiwi/Aviasales,
+ * FR24 CDN logotypes from clickhandler URL refs and IATA_ICAO paths.
  */
-export function airlineLogoCandidates(id: AirlineIdentity): string[] {
+export function airlineLogoCandidates(
+  id: AirlineIdentity,
+  fr24Detail?: unknown,
+): AirlineLogoSource[] {
   const iata = resolveAirlineIata(id);
   const icao = resolveAirlineIcao(id);
-  const urls: string[] = [];
+  const sources: AirlineLogoSource[] = [];
   const seen = new Set<string>();
 
-  const push = (url: string) => {
-    if (!seen.has(url)) {
-      seen.add(url);
-      urls.push(url);
+  const push = (source: AirlineLogoSource) => {
+    if (!seen.has(source.uri)) {
+      seen.add(source.uri);
+      sources.push(source);
     }
   };
 
+  if (icao) {
+    push(flightawareLogoSource(icao));
+  }
+
   if (iata) {
-    // Google Flights CDN — reliable under okhttp.
+    push({
+      uri: `https://images.kiwi.com/airlines/64/${encodeURIComponent(iata)}.png`,
+    });
+    push({
+      uri: `https://pics.avs.io/128/128/${encodeURIComponent(iata)}.png`,
+    });
+    push({
+      uri: `https://www.gstatic.com/flights/airline_logos/70px/${encodeURIComponent(iata)}.png`,
+    });
+  }
+
+  for (const source of fr24LogotypeSourcesFromAirline(fr24Detail)) {
+    push(source);
+  }
+
+  if (iata && icao) {
     push(
-      `https://www.gstatic.com/flights/airline_logos/70px/${encodeURIComponent(iata)}.png`,
+      fr24LogoSource(
+        `/assets/airlines/logotypes/${encodeURIComponent(iata)}_${encodeURIComponent(icao)}.png`,
+      ),
     );
-    push(
-      `https://images.kiwi.com/airlines/64/${encodeURIComponent(iata)}.png`,
-    );
-    push(`https://pics.avs.io/128/128/${encodeURIComponent(iata)}.png`);
   }
 
   if (icao) {
-    // FR24 ICAO assets (blocked for okhttp; useful on iOS / web).
-    push(
-      `https://www.flightradar24.com/static/images/data/operators/${encodeURIComponent(icao)}_logo0.png`,
-    );
+    push({
+      uri: `https://www.flightradar24.com/static/images/data/operators/${encodeURIComponent(icao)}_logo0.png`,
+      headers: FR24_IMAGE_HEADERS,
+    });
   }
 
-  return urls;
+  return sources;
 }
 
 /** @deprecated Prefer airlineLogoCandidates — single URL often 403 on Android. */
@@ -184,7 +325,7 @@ export function airlineLogoUrl(
   airlineIcao: string | undefined | null,
 ): string | null {
   const candidates = airlineLogoCandidates({ airlineIcao });
-  return candidates[0] ?? null;
+  return candidates[0]?.uri ?? null;
 }
 
 /**

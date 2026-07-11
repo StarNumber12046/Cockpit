@@ -12,6 +12,7 @@ import { useFr24Detail } from "../../hooks/useFr24Detail";
 import { useFr24Flights } from "../../hooks/useFr24Flights";
 import { useSquawkReporter } from "../../hooks/useSquawkReporter";
 import { useFr24Search } from "../../hooks/useFr24Search";
+import { useSearchHitDetails } from "../../hooks/useSearchHitDetails";
 import { FlightMap, type FlightMapHandle, type MapRegion } from "../../components/FlightMap";
 import { FlightSheet } from "../../components/FlightSheet";
 import { ChromeSheet } from "../../components/ChromeSheet";
@@ -28,6 +29,8 @@ import {
   normalizeTrailPoints,
   type TrailPointLike,
 } from "../../lib/altitudeColor";
+import { searchHitCoordinates } from "../../lib/searchCoords";
+import { isValidMapCoordinate } from "../../components/AircraftMarker";
 
 /** Ignore tiny region noise so pan jitter does not thrash the FR24 feed. */
 const REGION_EPSILON = 1e-5;
@@ -126,10 +129,27 @@ export default function HomeScreen() {
     );
   }, [flights.length, loading, error]);
 
+  const flyToCoords = useCallback((latitude: number, longitude: number) => {
+    if (!isValidMapCoordinate(latitude, longitude)) return;
+    mapRef.current?.flyTo(latitude, longitude);
+  }, []);
+
+  const onOffMapLocationReady = useCallback(
+    (latitude: number, longitude: number) => {
+      flyToCoords(latitude, longitude);
+    },
+    [flyToCoords],
+  );
+
   const onSelectSearchHit = (item: {
     fr24Id?: string;
     id: string;
     label: string;
+    callsign?: string;
+    flightNumber?: string;
+    lat?: number;
+    lon?: number;
+    raw?: unknown;
   }) => {
     const fr24Id = item.fr24Id ?? item.id;
     const key = fr24Id;
@@ -138,18 +158,30 @@ export default function HomeScreen() {
     if (onMap) {
       setSelected(onMap);
       setOffMapFlightId(null);
-      mapRef.current?.flyTo(onMap.latitude, onMap.longitude);
+      flyToCoords(onMap.latitude, onMap.longitude);
       setQuery("");
       clear();
       setBusyId(null);
       return;
     }
+
+    const coords = searchHitCoordinates(item);
+    if (coords) {
+      flyToCoords(coords.lat, coords.lon);
+    }
+
     setQuery("");
     clear();
     setBusyId(null);
     setOffMapFlightId(fr24Id);
-    setOffMapFlightNumber(item.label.replace(/\s+/g, "").toUpperCase());
-    setOffMapCallsign(item.label.replace(/\s+/g, "").toUpperCase());
+    const flightNumber = (item.flightNumber ?? item.label)
+      .replace(/\s+/g, "")
+      .toUpperCase();
+    const callsign = (item.callsign ?? item.label)
+      .replace(/\s+/g, "")
+      .toUpperCase();
+    setOffMapFlightNumber(flightNumber);
+    setOffMapCallsign(callsign);
   };
 
   // Keep sheet in sync if the selected flight moves on poll refresh.
@@ -157,6 +189,15 @@ export default function HomeScreen() {
     if (!selected) return null;
     return flights.find((f) => f.fr24Id === selected.fr24Id) ?? selected;
   }, [flights, selected]);
+
+  // After flying to an off-map search hit, select it once the feed includes it.
+  useEffect(() => {
+    if (!offMapFlightId || selected?.fr24Id === offMapFlightId) return;
+    const found = flights.find((f) => f.fr24Id === offMapFlightId);
+    if (!found) return;
+    setSelected(found);
+    setOffMapFlightId(null);
+  }, [flights, offMapFlightId, selected?.fr24Id]);
 
   // FR24 detail payload includes past positions (`trail`) for the selected aircraft.
   const {
@@ -177,16 +218,35 @@ export default function HomeScreen() {
   }, [selectedDetail?.trail, selectedLive]);
 
   const liveHits = results.live;
+  const showSearchResults = query.trim().length > 0 && liveHits.length > 0;
+  const searchHitDetails = useSearchHitDetails(
+    liveHits,
+    flights,
+    showSearchResults,
+  );
+
+  useEffect(() => {
+    if (!showSearchResults) return;
+    setAlertsOpen(false);
+    setTrackedOpen(false);
+  }, [showSearchResults]);
   const alertCount = alerts?.length ?? 0;
   const trackedCount = tracked?.length ?? 0;
 
+  const closeSearch = useCallback(() => {
+    setQuery("");
+    clear();
+  }, [clear]);
+
   const openAlerts = () => {
     setTrackedOpen(false);
+    closeSearch();
     setAlertsOpen(true);
   };
 
   const openTracked = () => {
     setAlertsOpen(false);
+    closeSearch();
     setTrackedOpen(true);
   };
 
@@ -201,7 +261,7 @@ export default function HomeScreen() {
     if (onMap) {
       setSelected(onMap);
       setOffMapFlightId(null);
-      mapRef.current?.flyTo(onMap.latitude, onMap.longitude);
+      flyToCoords(onMap.latitude, onMap.longitude);
       return;
     }
     setOffMapFlightId(item.fr24Id);
@@ -216,6 +276,7 @@ export default function HomeScreen() {
         flights={flights}
         selectedId={selectedLive?.fr24Id}
         trail={selectedTrail}
+        selectedDetail={selectedDetail}
         onSelectFlight={(f) => { setSelected(f); setOffMapFlightId(null); }}
         onRegionChange={onRegionChange}
       />
@@ -245,19 +306,6 @@ export default function HomeScreen() {
           />
         ) : null}
 
-        {query.trim().length > 0 && liveHits.length > 0 ? (
-          <FlightSearchResults
-            hits={liveHits}
-            busyId={busyId}
-            onSelect={onSelectSearchHit}
-            actionLabel={(item) =>
-              flights.some((f) => f.fr24Id === (item.fr24Id ?? item.id))
-                ? "Show on map"
-                : "Open"
-            }
-          />
-        ) : null}
-
         {error ? (
           <ErrorBanner message={error} onRetry={() => void refresh()} />
         ) : null}
@@ -280,7 +328,7 @@ export default function HomeScreen() {
         offMapFlightId={offMapFlightId ?? undefined}
         offMapFlightNumber={offMapFlightNumber}
         offMapCallsign={offMapCallsign}
-        onOffMapLocationReady={(lat, lng) => mapRef.current?.flyTo(lat, lng)}
+        onOffMapLocationReady={onOffMapLocationReady}
       />
 
       <ChromeSheet
@@ -297,6 +345,20 @@ export default function HomeScreen() {
         onClose={() => setTrackedOpen(false)}
       >
         <TrackedPanel onOpenFlight={onOpenTrackedFlight} />
+      </ChromeSheet>
+
+      <ChromeSheet
+        visible={showSearchResults}
+        title="Search"
+        onClose={closeSearch}
+      >
+        <FlightSearchResults
+          hits={liveHits}
+          flights={flights}
+          detailsById={searchHitDetails}
+          busyId={busyId}
+          onSelect={onSelectSearchHit}
+        />
       </ChromeSheet>
     </View>
   );

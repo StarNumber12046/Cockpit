@@ -17,18 +17,15 @@ import {
   type LayoutChangeEvent,
 } from "react-native";
 import MapView, { PROVIDER_DEFAULT, type Region } from "react-native-maps";
-import type { Fr24Flight } from "@cockpit/fr24";
+import type { Fr24Flight, Fr24FlightDetails } from "@cockpit/fr24";
 import { isEmergencySquawk } from "@cockpit/shared";
 import { HUB } from "../constants/config";
 import { DARK_MAP_STYLE, radiusToLatitudeDelta } from "../constants/mapStyle";
 import { colors, radius, spacing, typography } from "../constants/theme";
+import { useLiveTrail } from "../hooks/useLiveTrail";
 import { useSmoothedFlights } from "../hooks/useSmoothedFlights";
 import { useUserLocation } from "../hooks/useUserLocation";
-import {
-  buildTrailSegments,
-  trailWithLivePosition,
-  type TrailPointLike,
-} from "../lib/altitudeColor";
+import { buildTrailSegments, type TrailPointLike } from "../lib/altitudeColor";
 import { aircraftIconLayout } from "../lib/aircraftIcons";
 import { AIRCRAFT_ICON_SIZE, AircraftIcon } from "./AircraftIcon";
 import { AircraftMarker, isValidMapCoordinate } from "./AircraftMarker";
@@ -55,6 +52,8 @@ type Props = {
   selectedId?: string | null;
   /** Past positions for the selected aircraft (from FR24 detail trail). */
   trail?: TrailPointLike[] | null;
+  /** Clickhandler payload for the selected flight (authoritative airline codes). */
+  selectedDetail?: Fr24FlightDetails | null;
   onSelectFlight: (flight: Fr24Flight | null) => void;
   /** Fires when the visible map region settles (pan/zoom end) or on first layout. */
   onRegionChange?: (region: Region) => void;
@@ -167,27 +166,6 @@ function SelectedPlaneOverlay({
   );
 }
 
-/** Selected aircraft uses feed coordinates so marker and trail share the same fix. */
-function withRawSelectedPosition(
-  smoothed: Fr24Flight[],
-  flights: Fr24Flight[],
-  selectedId?: string | null,
-): Fr24Flight[] {
-  if (!selectedId) return smoothed;
-  const raw = flights.find((f) => f.fr24Id === selectedId);
-  if (!raw) return smoothed;
-  return smoothed.map((f) =>
-    f.fr24Id === selectedId
-      ? {
-          ...f,
-          latitude: raw.latitude,
-          longitude: raw.longitude,
-          heading: raw.heading,
-        }
-      : f,
-  );
-}
-
 /**
  * Live map of FR24 aircraft. Native MapView on iOS/Android;
  * projected canvas fallback on web (react-native-maps is weak there).
@@ -198,7 +176,7 @@ function withRawSelectedPosition(
  *    (Text/Image work normally — no Marker bitmap clipping)
  */
 export const FlightMap = forwardRef<FlightMapHandle, Props>(function FlightMap(
-  { flights, selectedId, trail, onSelectFlight, onRegionChange },
+  { flights, selectedId, trail, selectedDetail, onSelectFlight, onRegionChange },
   ref,
 ) {
   if (Platform.OS === "web") {
@@ -208,6 +186,7 @@ export const FlightMap = forwardRef<FlightMapHandle, Props>(function FlightMap(
         flights={flights}
         selectedId={selectedId}
         trail={trail}
+        selectedDetail={selectedDetail}
         onSelectFlight={onSelectFlight}
         onRegionChange={onRegionChange}
       />
@@ -220,6 +199,7 @@ export const FlightMap = forwardRef<FlightMapHandle, Props>(function FlightMap(
       flights={flights}
       selectedId={selectedId}
       trail={trail}
+      selectedDetail={selectedDetail}
       onSelectFlight={onSelectFlight}
       onRegionChange={onRegionChange}
     />
@@ -262,7 +242,14 @@ function useBootRegion(
 
 const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
   function NativeFlightMap(
-    { flights, selectedId, trail, onSelectFlight, onRegionChange },
+    {
+      flights,
+      selectedId,
+      trail,
+      selectedDetail,
+      onSelectFlight,
+      onRegionChange,
+    },
     ref,
   ) {
     const mapRef = useRef<MapView>(null);
@@ -290,11 +277,7 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
     const moveEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Smooth poll snaps so planes/badges glide instead of teleporting.
-    const smoothed = useSmoothedFlights(flights);
-    const mapFlights = useMemo(
-      () => withRawSelectedPosition(smoothed, flights, selectedId),
-      [smoothed, flights, selectedId],
-    );
+    const mapFlights = useSmoothedFlights(flights);
     const selectedFlight = useMemo(
       () =>
         selectedId
@@ -363,14 +346,17 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
       return selected ? [selected, ...rest] : rest;
     }, [mapFlights, markersEnabled, selectedId, markerCap]);
 
-    const displayTrail = useMemo(() => {
-      if (!selectedFlight || !trail?.length) return trail;
-      return trailWithLivePosition(trail, {
-        lat: selectedFlight.latitude,
-        lng: selectedFlight.longitude,
-        alt: selectedFlight.altitude,
-      });
-    }, [trail, selectedFlight]);
+    const displayTrail = useLiveTrail(
+      trail,
+      selectedFlight
+        ? {
+            lat: selectedFlight.latitude,
+            lng: selectedFlight.longitude,
+            alt: selectedFlight.altitude,
+          }
+        : null,
+      selectedId,
+    );
 
     const updateSelectedScreen = useCallback(async () => {
       if (!selectedFlight || !mapRef.current || !mapReady) {
@@ -583,6 +569,7 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
                 >
                   <CallsignBadge
                     flight={flight}
+                    detail={selected ? selectedDetail : undefined}
                     selected={selected}
                     emergency={emergency}
                   />
@@ -608,7 +595,14 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
 
 /** Simple lat/lon projection for web / fallback — no map tiles. */
 const WebFlightMap = forwardRef<FlightMapHandle, Props>(function WebFlightMap(
-  { flights, selectedId, trail, onSelectFlight, onRegionChange },
+  {
+    flights,
+    selectedId,
+    trail,
+    selectedDetail,
+    onSelectFlight,
+    onRegionChange,
+  },
   ref,
 ) {
   const [size, setSize] = useState({ w: 1, h: 1 });
@@ -618,11 +612,7 @@ const WebFlightMap = forwardRef<FlightMapHandle, Props>(function WebFlightMap(
   const bootRegion = useBootRegion(userCoords, status);
   const [region, setRegion] = useState<Region | null>(null);
   const activeRegion = region ?? bootRegion ?? hubRegion();
-  const smoothed = useSmoothedFlights(flights);
-  const mapFlights = useMemo(
-    () => withRawSelectedPosition(smoothed, flights, selectedId),
-    [smoothed, flights, selectedId],
-  );
+  const mapFlights = useSmoothedFlights(flights);
   const selectedFlight = useMemo(
     () =>
       selectedId
@@ -673,14 +663,17 @@ const WebFlightMap = forwardRef<FlightMapHandle, Props>(function WebFlightMap(
     return (deg / activeRegion.latitudeDelta) * size.h;
   };
 
-  const displayTrail = useMemo(() => {
-    if (!selectedFlight || !trail?.length) return trail;
-    return trailWithLivePosition(trail, {
-      lat: selectedFlight.latitude,
-      lng: selectedFlight.longitude,
-      alt: selectedFlight.altitude,
-    });
-  }, [trail, selectedFlight]);
+  const displayTrail = useLiveTrail(
+    trail,
+    selectedFlight
+      ? {
+          lat: selectedFlight.latitude,
+          lng: selectedFlight.longitude,
+          alt: selectedFlight.altitude,
+        }
+      : null,
+    selectedId,
+  );
 
   const trailSegments = useMemo(
     () => (selectedId ? buildTrailSegments(displayTrail) : []),
@@ -788,6 +781,7 @@ const WebFlightMap = forwardRef<FlightMapHandle, Props>(function WebFlightMap(
               <View style={styles.webBadgeLift}>
                 <CallsignBadge
                   flight={flight}
+                  detail={selected ? selectedDetail : undefined}
                   selected={selected}
                   emergency={emergency}
                 />
