@@ -96,10 +96,13 @@ for (const build of buildList) {
   notes.push(`- **${platform}**: [EAS install page](${installUrl})`);
 }
 
+const convexUrl = process.env.EXPO_PUBLIC_CONVEX_URL?.trim();
+
 const body = [
   `## Cockpit ${tag}`,
   "",
   "Preview internal distribution builds from EAS.",
+  ...(convexUrl ? ["", `**Convex backend:** ${convexUrl}`] : []),
   "",
   "Install the attached binaries directly, or use the EAS install links:",
   "",

@@ -1,14 +1,18 @@
 import { v } from "convex/values";
 import { internalQuery, mutation, query } from "./_generated/server";
 import { normalizeHex } from "./lib/flightSession";
+import { Id } from "./_generated/dataModel";
 
-/** List tracked flights (anonymous v1 — no auth). */
+/** Returns this user's tracked flights. Returns [] when not authenticated. */
 export const list = query({
   args: {},
   handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return [];
+    const userId = identity.subject as Id<"users">;
     return await ctx.db
       .query("trackedFlights")
-      .withIndex("by_createdAt")
+      .withIndex("by_userId", (q) => q.eq("userId", userId))
       .order("desc")
       .collect();
   },
@@ -24,26 +28,31 @@ export const add = mutation({
     flightStartedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+    const userId = identity.subject as Id<"users">;
+
     const flightNumber = args.flightNumber.replace(/\s+/g, "").toUpperCase();
     if (!flightNumber) {
       throw new Error("flightNumber is required");
     }
 
-    // Avoid exact duplicates by flightNumber + optional fr24Id.
+    // Avoid exact duplicates scoped to this user.
     const existing = await ctx.db
       .query("trackedFlights")
-      .withIndex("by_flightNumber", (q) => q.eq("flightNumber", flightNumber))
+      .withIndex("by_userId", (q) => q.eq("userId", userId))
       .collect();
 
     const match = existing.find((row) => {
       if (args.fr24Id && row.fr24Id) return row.fr24Id === args.fr24Id;
       if (args.fr24Id && !row.fr24Id) return false;
-      return true;
+      return row.flightNumber === flightNumber;
     });
 
     if (match) return match._id;
 
     return await ctx.db.insert("trackedFlights", {
+      userId,
       fr24Id: args.fr24Id,
       icao24: normalizeHex(args.icao24),
       flightNumber,
@@ -55,7 +64,7 @@ export const add = mutation({
   },
 });
 
-/** Cron: poll ACARS for tracked flights (newest first, capped). */
+/** Cron: poll ACARS for tracked flights (newest first, capped, all users). */
 export const listForPoll = internalQuery({
   args: {},
   handler: async (ctx) => {
@@ -72,6 +81,15 @@ export const remove = mutation({
     id: v.id("trackedFlights"),
   },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+
+    const row = await ctx.db.get(args.id);
+    if (!row) throw new Error("Not found");
+    if (row.userId !== (identity.subject as Id<"users">)) {
+      throw new Error("Unauthorized");
+    }
+
     await ctx.db.delete(args.id);
   },
 });

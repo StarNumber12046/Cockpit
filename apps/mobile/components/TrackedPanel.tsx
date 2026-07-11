@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useMutation, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { useRouter } from "expo-router";
 import { api } from "../lib/convex";
 import { EmptyState } from "./EmptyState";
 import { LoadingState } from "./LoadingState";
@@ -12,8 +13,28 @@ type Props = {
 };
 
 export function TrackedPanel({ onOpenFlight }: Props) {
+  const { isAuthenticated } = useConvexAuth();
+  const router = useRouter();
   const tracked = useQuery(api.tracked.list);
   const removeTracked = useMutation(api.tracked.remove);
+
+  if (!isAuthenticated) {
+    return (
+      <View style={styles.authPrompt}>
+        <Text style={styles.authTitle}>Sign in to track flights</Text>
+        <Text style={styles.authBody}>
+          Track flights to receive ACARS alerts and monitor them in the background.
+        </Text>
+        <Pressable
+          style={({ pressed }) => [styles.authBtn, pressed && styles.authBtnPressed]}
+          onPress={() => router.push("/sign-in")}
+          accessibilityRole="button"
+        >
+          <Text style={styles.authBtnLabel}>Sign in</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   if (tracked === undefined) {
     return <LoadingState label="Loading tracked flights…" />;
@@ -60,6 +81,40 @@ export function TrackedPanel({ onOpenFlight }: Props) {
 const styles = StyleSheet.create({
   root: {
     gap: spacing.sm,
+  },
+  authPrompt: {
+    gap: spacing.sm,
+    paddingVertical: spacing.lg,
+    alignItems: "center",
+  },
+  authTitle: {
+    ...typography.subtitle,
+    textAlign: "center",
+  },
+  authBody: {
+    ...typography.body,
+    color: colors.textMuted,
+    textAlign: "center",
+    lineHeight: 20,
+    paddingHorizontal: spacing.md,
+  },
+  authBtn: {
+    marginTop: spacing.sm,
+    height: 44,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radius.md,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  authBtnPressed: {
+    opacity: 0.85,
+  },
+  authBtnLabel: {
+    ...typography.subtitle,
+    fontWeight: "600",
   },
   card: {
     flexDirection: "row",

@@ -18,7 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
-      EXPO_PUBLIC_CONVEX_URL: ${{ secrets.EXPO_PUBLIC_CONVEX_URL }}
+      CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      ACARS_EXPLAIN_MODEL: ${{ secrets.ACARS_EXPLAIN_MODEL }}
       EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
     steps:
       - name: Checkout
@@ -43,6 +45,9 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
           echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Deploy Convex and configure env
+        run: node scripts/convex-release.mjs
 
       - name: Setup Expo and EAS
         uses: expo/expo-github-action@v8

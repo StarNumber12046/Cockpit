@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { authTables } from "@convex-dev/auth/server";
 
 const correlationFields = {
   fr24Id: v.optional(v.string()),
@@ -9,6 +10,8 @@ const correlationFields = {
 };
 
 export default defineSchema({
+  ...authTables,
+
   acarsMessages: defineTable({
     ...correlationFields,
     timestamp: v.number(),
@@ -111,6 +114,8 @@ export default defineSchema({
     .index("by_fr24Id", ["fr24Id"]),
 
   trackedFlights: defineTable({
+    /** Owner of this tracked flight. */
+    userId: v.id("users"),
     fr24Id: v.optional(v.string()),
     icao24: v.optional(v.string()),
     flightNumber: v.string(),
@@ -122,5 +127,6 @@ export default defineSchema({
   })
     .index("by_createdAt", ["createdAt"])
     .index("by_flightNumber", ["flightNumber"])
-    .index("by_fr24Id", ["fr24Id"]),
+    .index("by_fr24Id", ["fr24Id"])
+    .index("by_userId", ["userId"]),
 });

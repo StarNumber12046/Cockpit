@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { Stack } from "expo-router";
 import { useFonts } from "expo-font";
 import { StatusBar } from "expo-status-bar";
-import { ConvexProvider, ConvexReactClient } from "convex/react";
+import { ConvexReactClient } from "convex/react";
+import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { Text, View } from "react-native";
 import { FontAwesomeFont } from "../lib/vectorIcons";
 import RoboFlex from "../assets/fonts/RobotoFlex.ttf";
@@ -59,7 +60,7 @@ export default function RootLayout() {
 
   return (
     <AppErrorBoundary>
-      <ConvexProvider client={convex}>
+      <ConvexAuthProvider client={convex}>
         <StatusBar style="light" />
         <Stack
           screenOptions={{
@@ -71,8 +72,9 @@ export default function RootLayout() {
           }}
         >
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="sign-in" options={{ headerShown: false, presentation: "modal" }} />
         </Stack>
-      </ConvexProvider>
+      </ConvexAuthProvider>
     </AppErrorBoundary>
   );
 }

@@ -12,7 +12,8 @@ import {
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useMutation, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { useRouter } from "expo-router";
 import type { Fr24Flight, Fr24FlightDetails } from "@cockpit/fr24";
 import {
   formatAltitude,
@@ -113,6 +114,8 @@ export function FlightSheet({
   onOffMapLocationReady,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const { isAuthenticated } = useConvexAuth();
+  const router = useRouter();
 
   // When no live flight object but we have a fr24Id, fetch detail independently.
   const offMap = useFr24Detail(!flight && offMapFlightId ? offMapFlightId : null);
@@ -331,6 +334,10 @@ export function FlightSheet({
 
   const onToggleTrack = useCallback(() => {
     if (!display) return;
+    if (!isAuthenticated) {
+      router.push("/sign-in");
+      return;
+    }
     if (trackedEntry) {
       void removeTracked({ id: trackedEntry._id });
       return;
@@ -343,7 +350,7 @@ export function FlightSheet({
       label,
       flightStartedAt: resolvedDetail ? parseFlightStartedAtMs(resolvedDetail) : undefined,
     });
-  }, [addTracked, resolvedDetail, display, label, removeTracked, trackedEntry]);
+  }, [addTracked, isAuthenticated, resolvedDetail, display, label, removeTracked, router, trackedEntry]);
 
   const speedSeries = useMemo(
     () =>
@@ -554,7 +561,7 @@ export function FlightSheet({
                 }
               >
                 <FaIcon
-                  name={isTracked ? "bell-slash" : "bell"}
+                  name={!isAuthenticated ? "lock" : isTracked ? "bell-slash" : "bell"}
                   size={22}
                   color={isTracked ? colors.highlight : colors.textMuted}
                 />

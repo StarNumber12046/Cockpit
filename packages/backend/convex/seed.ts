@@ -133,18 +133,14 @@ export const populate = mutation({
     }
 
     // --- Tracked sample ---
-    await ctx.db.insert("trackedFlights", {
-      flightNumber: "UA123",
-      callsign: "UAL123",
-      label: "Demo United 123",
-      createdAt: now,
-    });
+    // Tracked flights are now per-user and require an authenticated userId.
+    // The seed skips this insert; use the app UI to track flights after signing in.
 
     return {
       seeded: true,
       acars: acarsSeeds.length,
       alerts: alertSeeds.length,
-      tracked: 1,
+      tracked: 0,
     };
   },
 });

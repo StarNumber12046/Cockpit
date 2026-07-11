@@ -14,14 +14,17 @@
     "use:cloud": "convex deployment select dev",
     "use:local": "convex deployment select local",
     "seed": "convex run seed:populate",
+    "deploy": "convex deploy",
     "dashboard": "convex dashboard",
     "typecheck": "tsc --noEmit",
     "clean": "rimraf .turbo"
   },
   "dependencies": {
+    "@ai-sdk/groq": "^4.0.6",
+    "@auth/core": "0.37.0",
     "@cockpit/fr24": "workspace:*",
     "@cockpit/shared": "workspace:*",
-    "@ai-sdk/groq": "^4.0.6",
+    "@convex-dev/auth": "^0.0.94",
     "@types/node": "^26.1.1",
     "ai": "^7.0.18",
     "convex": "^1.24.8"
