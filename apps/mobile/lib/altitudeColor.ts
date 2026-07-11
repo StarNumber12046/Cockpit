@@ -158,6 +158,23 @@ export function normalizeTrailPoints(
   return parsed;
 }
 
+/** Pin the trail end to the same live fix the aircraft marker uses. */
+export function trailWithLivePosition(
+  points: TrailPointLike[] | null | undefined,
+  live?: { lat: number; lng: number; alt?: number | null } | null,
+): TrailPointLike[] | null | undefined {
+  if (!points?.length || !live) return points;
+  const out = points.slice();
+  const last = out[out.length - 1]!;
+  out[out.length - 1] = {
+    ...last,
+    lat: live.lat,
+    lng: live.lng,
+    alt: live.alt ?? last.alt,
+  };
+  return out;
+}
+
 /**
  * Build map polylines from a trail. Adjacent segments that share the same
  * color band are merged so we don't spawn one Polyline per edge.

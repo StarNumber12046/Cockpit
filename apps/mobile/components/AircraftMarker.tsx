@@ -1,9 +1,10 @@
 import { memo, useEffect, useState } from "react";
-import { Platform, StyleSheet, View } from "react-native";
+import { Platform, View } from "react-native";
 import { Marker } from "react-native-maps";
 import type { Fr24Flight } from "@cockpit/fr24";
 import { isEmergencySquawk } from "@cockpit/shared";
 import { colors } from "../constants/theme";
+import { aircraftIconLayout } from "../lib/aircraftIcons";
 import { AIRCRAFT_ICON_SIZE, AircraftIcon } from "./AircraftIcon";
 
 type Props = {
@@ -16,8 +17,6 @@ type Props = {
  * Plane glyph only — ICAO-type SVG silhouette (no circle). Callsign badges are
  * a screen overlay (Android Marker bitmaps clip Text).
  */
-/** Hit box fits scaled heavies (~1.25×) without clipping the silhouette. */
-const HIT = Math.ceil(AIRCRAFT_ICON_SIZE * 1.35) + 4;
 /**
  * Android snapshots Marker children to bitmaps while tracksViewChanges is true.
  * Keep this short — many markers enabling together can OOM the heap.
@@ -57,10 +56,23 @@ function AircraftMarkerInner({ flight, selected, onPress }: Props) {
     setTracksViewChanges(true);
     const t = setTimeout(() => setTracksViewChanges(false), TRACK_MS);
     return () => clearTimeout(t);
-  }, [coordsValid, selected, emergency, flight.onGround, tint, flight.aircraftCode]);
+  }, [
+    coordsValid,
+    selected,
+    emergency,
+    flight.onGround,
+    tint,
+    flight.aircraftCode,
+    rotation,
+  ]);
 
   // Never push non-finite coords to AIRMapMarker — native update can OOM/crash.
   if (!coordsValid) return null;
+
+  const { width, height, canvas } = aircraftIconLayout(
+    flight.aircraftCode,
+    AIRCRAFT_ICON_SIZE,
+  );
 
   return (
     <Marker
@@ -68,7 +80,7 @@ function AircraftMarkerInner({ flight, selected, onPress }: Props) {
         latitude: flight.latitude,
         longitude: flight.longitude,
       }}
-      rotation={rotation}
+      rotation={0}
       flat
       anchor={{ x: 0.5, y: 0.5 }}
       tracksViewChanges={tracksViewChanges}
@@ -80,12 +92,28 @@ function AircraftMarkerInner({ flight, selected, onPress }: Props) {
       }}
       identifier={flight.fr24Id}
     >
-      <View style={styles.hit} collapsable={false}>
-        <AircraftIcon
-          aircraftCode={flight.aircraftCode}
-          color={tint}
-          size={AIRCRAFT_ICON_SIZE}
-        />
+      <View
+        style={{
+          width: canvas,
+          height: canvas,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+        collapsable={false}
+      >
+        <View
+          style={{
+            width,
+            height,
+            transform: [{ rotate: `${rotation}deg` }],
+          }}
+        >
+          <AircraftIcon
+            aircraftCode={flight.aircraftCode}
+            color={tint}
+            size={AIRCRAFT_ICON_SIZE}
+          />
+        </View>
       </View>
     </Marker>
   );
@@ -104,12 +132,4 @@ export const AircraftMarker = memo(
     a.flight.aircraftCode === b.flight.aircraftCode,
 );
 
-const styles = StyleSheet.create({
-  hit: {
-    width: HIT,
-    height: HIT,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "transparent",
-  },
-});
+

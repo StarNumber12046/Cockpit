@@ -17,8 +17,9 @@
     "sync:convex-url": "node scripts/sync-convex-url.mjs"
   },
   "devDependencies": {
+    "rimraf": "^6.0.1",
+    "svg-path-bbox": "^2.1.0",
     "turbo": "^2.5.4",
-    "typescript": "^5.8.3",
-    "rimraf": "^6.0.1"
+    "typescript": "^5.8.3"
   }
 }

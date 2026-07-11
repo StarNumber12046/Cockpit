@@ -2,6 +2,7 @@ import https from "https";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { svgPathBbox } from "svg-path-bbox";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(
@@ -88,6 +89,27 @@ new Function(
   "g.shapes = " + shapesLiteral + ";\ng.types = " + typesCode + ";",
 )(g);
 
+function parseViewBox(viewBox) {
+  const [x, y, w, h] = viewBox.split(/\s+/).map(Number);
+  return { x, y, w, h, cx: x + w / 2, cy: y + h / 2 };
+}
+
+function pathBbox(paths) {
+  const list = Array.isArray(paths) ? paths : [paths];
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  for (const d of list) {
+    const [x0, y0, x1, y1] = svgPathBbox(d);
+    minX = Math.min(minX, x0);
+    minY = Math.min(minY, y0);
+    maxX = Math.max(maxX, x1);
+    maxY = Math.max(maxY, y1);
+  }
+  return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
+}
+
 const shapes = {};
 for (const k of NEED) {
   const s = g.shapes[k];
@@ -95,6 +117,10 @@ for (const k of NEED) {
     console.warn("missing shape", k);
     continue;
   }
+  const vb = parseViewBox(s.viewBox);
+  const bb = pathBbox(s.path);
+  const shiftX = +(vb.cx - bb.cx).toFixed(2);
+  const shiftY = +(vb.cy - bb.cy).toFixed(2);
   shapes[k] = {
     w: s.w,
     h: s.h,
@@ -102,6 +128,8 @@ for (const k of NEED) {
     strokeScale: s.strokeScale ?? 1,
     path: s.path,
     transform: s.transform ?? null,
+    centerShift:
+      shiftX === 0 && shiftY === 0 ? null : [shiftX, shiftY],
   };
 }
 

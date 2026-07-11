@@ -1,6 +1,11 @@
 import { memo } from "react";
 import Svg, { G, Path } from "react-native-svg";
-import { resolveAircraftIcon, type AircraftShape } from "../lib/aircraftIcons";
+import {
+  aircraftIconDimensions,
+  aircraftIconTransform,
+  resolveAircraftIcon,
+  type AircraftShape,
+} from "../lib/aircraftIcons";
 
 type Props = {
   /** ICAO type designator from FR24 feed (B738, A320, …). */
@@ -20,19 +25,17 @@ function AircraftIconInner({
   color,
   size = AIRCRAFT_ICON_SIZE,
 }: Props) {
-  const { shape, scale } = resolveAircraftIcon(aircraftCode);
-  const dim = Math.round(size * scale);
-  // Paths use large viewBox units (e.g. 0–380); strokeScale matches tar1090.
-  // const stroke = 2 * 0.75 * (shape.strokeScale ?? 1);
+  const { shape } = resolveAircraftIcon(aircraftCode);
+  const { width, height } = aircraftIconDimensions(aircraftCode, size);
+  const transform = aircraftIconTransform(shape);
 
   return (
     <Svg
-      width={dim}
-      height={dim}
+      width={width}
+      height={height}
       viewBox={shape.viewBox}
-      // Keep aspect; tar1090 shapes are taller than wide for airliners.
     >
-      <G transform={shape.transform ?? undefined}>
+      <G transform={transform}>
         {pathsOf(shape).map((d, i) => (
           <Path
             key={i}

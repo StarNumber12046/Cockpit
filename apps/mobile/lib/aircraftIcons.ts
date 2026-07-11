@@ -16,6 +16,8 @@ export type AircraftShape = {
   strokeScale: number;
   path: string | string[];
   transform?: string | null;
+  /** viewBox-unit translate to align path centroid with geographic anchor. */
+  centerShift?: [number, number] | null;
 };
 
 type ShapeDb = {
@@ -24,7 +26,7 @@ type ShapeDb = {
   types: Record<string, [string, number]>;
 };
 
-const db = data as ShapeDb;
+const db = data as unknown as ShapeDb;
 
 export type ResolvedAircraftIcon = {
   shape: AircraftShape;
@@ -32,6 +34,42 @@ export type ResolvedAircraftIcon = {
   scale: number;
   shapeKey: string;
 };
+
+export type AircraftIconDimensions = {
+  width: number;
+  height: number;
+};
+
+export type AircraftIconLayout = AircraftIconDimensions & {
+  /** Square outer canvas so heading rotation does not clip corners. */
+  canvas: number;
+};
+
+/**
+ * Pixel layout for a map glyph — matches tar1090 (shape.w × shape.h, not square).
+ * `baseSize` maps to the longest silhouette edge at type scale 1.
+ * Height is rounded first so aspect ratio stays true to the silhouette.
+ */
+export function aircraftIconDimensions(
+  aircraftCode: string | null | undefined,
+  baseSize: number,
+): AircraftIconDimensions {
+  const { width, height } = aircraftIconLayout(aircraftCode, baseSize);
+  return { width, height };
+}
+
+/** Marker / overlay sizing: tar1090 aspect ratio inside a rotation-safe square canvas. */
+export function aircraftIconLayout(
+  aircraftCode: string | null | undefined,
+  baseSize: number,
+): AircraftIconLayout {
+  const { shape, scale } = resolveAircraftIcon(aircraftCode);
+  const maxEdge = Math.max(shape.w, shape.h);
+  const height = Math.round((baseSize * scale * shape.h) / maxEdge);
+  const width = Math.round((baseSize * scale * shape.w) / maxEdge);
+  const canvas = Math.ceil(Math.max(width, height) * Math.SQRT2);
+  return { width, height, canvas };
+}
 
 /** Resolve silhouette for an ICAO type designator (e.g. B738, A20N). */
 export function resolveAircraftIcon(
@@ -47,6 +85,16 @@ export function resolveAircraftIcon(
     throw new Error("Missing unknown aircraft shape");
   }
   return { shape, scale, shapeKey };
+}
+
+/** Center path centroid on the viewBox anchor (tar1090 letterbox center). */
+export function aircraftIconTransform(shape: AircraftShape): string | undefined {
+  const parts: string[] = [];
+  if (shape.transform) parts.push(shape.transform);
+  if (shape.centerShift) {
+    parts.push(`translate(${shape.centerShift[0]}, ${shape.centerShift[1]})`);
+  }
+  return parts.length ? parts.join(" ") : undefined;
 }
 
 /** Ordered remote icon URLs (FR24 + fallbacks) for Image-based markers. */

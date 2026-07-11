@@ -24,7 +24,12 @@ import { DARK_MAP_STYLE, radiusToLatitudeDelta } from "../constants/mapStyle";
 import { colors, radius, spacing, typography } from "../constants/theme";
 import { useSmoothedFlights } from "../hooks/useSmoothedFlights";
 import { useUserLocation } from "../hooks/useUserLocation";
-import { buildTrailSegments, type TrailPointLike } from "../lib/altitudeColor";
+import {
+  buildTrailSegments,
+  trailWithLivePosition,
+  type TrailPointLike,
+} from "../lib/altitudeColor";
+import { aircraftIconLayout } from "../lib/aircraftIcons";
 import { AIRCRAFT_ICON_SIZE, AircraftIcon } from "./AircraftIcon";
 import { AircraftMarker, isValidMapCoordinate } from "./AircraftMarker";
 import { AircraftTrail } from "./AircraftTrail";
@@ -108,6 +113,79 @@ function projectToScreen(
     ((lon - (region.longitude - halfLon)) / region.longitudeDelta) * size.w;
   const y = ((region.latitude + halfLat - lat) / region.latitudeDelta) * size.h;
   return { x, y };
+}
+
+/** Selected glyph: map-native screen projection (matches Polyline geometry). */
+function SelectedPlaneOverlay({
+  flight,
+  x,
+  y,
+  onPress,
+}: {
+  flight: Fr24Flight;
+  x: number;
+  y: number;
+  onPress: (flight: Fr24Flight) => void;
+}) {
+  const emergency = isEmergencySquawk(flight.squawk);
+  const tint = emergency ? colors.danger : colors.success;
+  const { width, height, canvas } = aircraftIconLayout(
+    flight.aircraftCode,
+    AIRCRAFT_ICON_SIZE,
+  );
+  const rotate = `${((flight.heading % 360) + 360) % 360}deg`;
+
+  return (
+    <View style={styles.planeOverlay} pointerEvents="box-none">
+      <Pressable
+        onPress={() => onPress(flight)}
+        style={[
+          styles.selectedPlane,
+          {
+            left: x - canvas / 2,
+            top: y - canvas / 2,
+            width: canvas,
+            height: canvas,
+          },
+        ]}
+      >
+        <View
+          style={{
+            width,
+            height,
+            transform: [{ rotate }],
+          }}
+        >
+          <AircraftIcon
+            aircraftCode={flight.aircraftCode}
+            color={tint}
+            size={AIRCRAFT_ICON_SIZE}
+          />
+        </View>
+      </Pressable>
+    </View>
+  );
+}
+
+/** Selected aircraft uses feed coordinates so marker and trail share the same fix. */
+function withRawSelectedPosition(
+  smoothed: Fr24Flight[],
+  flights: Fr24Flight[],
+  selectedId?: string | null,
+): Fr24Flight[] {
+  if (!selectedId) return smoothed;
+  const raw = flights.find((f) => f.fr24Id === selectedId);
+  if (!raw) return smoothed;
+  return smoothed.map((f) =>
+    f.fr24Id === selectedId
+      ? {
+          ...f,
+          latitude: raw.latitude,
+          longitude: raw.longitude,
+          heading: raw.heading,
+        }
+      : f,
+  );
 }
 
 /**
@@ -213,6 +291,22 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
 
     // Smooth poll snaps so planes/badges glide instead of teleporting.
     const smoothed = useSmoothedFlights(flights);
+    const mapFlights = useMemo(
+      () => withRawSelectedPosition(smoothed, flights, selectedId),
+      [smoothed, flights, selectedId],
+    );
+    const selectedFlight = useMemo(
+      () =>
+        selectedId
+          ? mapFlights.find((f) => f.fr24Id === selectedId)
+          : undefined,
+      [mapFlights, selectedId],
+    );
+    const [selectedScreenPos, setSelectedScreenPos] = useState<{
+      x: number;
+      y: number;
+    } | null>(null);
+    const selectedScreenRafRef = useRef<number | null>(null);
 
     useEffect(() => {
       if (bootRegion && !region) {
@@ -255,7 +349,7 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
 
     const visibleFlights = useMemo(() => {
       if (!markersEnabled) return [];
-      const valid = smoothed.filter((f) =>
+      const valid = mapFlights.filter((f) =>
         isValidMapCoordinate(f.latitude, f.longitude),
       );
       const cap = Math.min(MAX_MARKERS, markerCap);
@@ -267,11 +361,67 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
         .filter((f) => f.fr24Id !== selectedId)
         .slice(0, cap - (selected ? 1 : 0));
       return selected ? [selected, ...rest] : rest;
-    }, [smoothed, markersEnabled, selectedId, markerCap]);
+    }, [mapFlights, markersEnabled, selectedId, markerCap]);
+
+    const displayTrail = useMemo(() => {
+      if (!selectedFlight || !trail?.length) return trail;
+      return trailWithLivePosition(trail, {
+        lat: selectedFlight.latitude,
+        lng: selectedFlight.longitude,
+        alt: selectedFlight.altitude,
+      });
+    }, [trail, selectedFlight]);
+
+    const updateSelectedScreen = useCallback(async () => {
+      if (!selectedFlight || !mapRef.current || !mapReady) {
+        setSelectedScreenPos(null);
+        return;
+      }
+      if (
+        !isValidMapCoordinate(
+          selectedFlight.latitude,
+          selectedFlight.longitude,
+        )
+      ) {
+        setSelectedScreenPos(null);
+        return;
+      }
+      try {
+        const pt = await mapRef.current.pointForCoordinate({
+          latitude: selectedFlight.latitude,
+          longitude: selectedFlight.longitude,
+        });
+        setSelectedScreenPos(pt);
+      } catch {
+        setSelectedScreenPos(null);
+      }
+    }, [selectedFlight, mapReady]);
+
+    const scheduleSelectedScreenUpdate = useCallback(() => {
+      if (!selectedId) return;
+      if (selectedScreenRafRef.current != null) return;
+      selectedScreenRafRef.current = requestAnimationFrame(() => {
+        selectedScreenRafRef.current = null;
+        void updateSelectedScreen();
+      });
+    }, [selectedId, updateSelectedScreen]);
+
+    useEffect(() => {
+      void updateSelectedScreen();
+    }, [updateSelectedScreen]);
+
+    useEffect(() => {
+      return () => {
+        if (selectedScreenRafRef.current != null) {
+          cancelAnimationFrame(selectedScreenRafRef.current);
+        }
+      };
+    }, []);
 
     const onMapLayout = (e: LayoutChangeEvent) => {
       const { width, height } = e.nativeEvent.layout;
       setMapSize({ w: width, h: height });
+      scheduleSelectedScreenUpdate();
     };
 
     /** Coalesce camera events to one React update per frame. */
@@ -352,6 +502,7 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
           onRegionChange={(next) => {
             setCameraMoving(true);
             scheduleRegionPaint(next);
+            scheduleSelectedScreenUpdate();
             // Fallback if complete doesn't fire (some Android builds).
             if (moveEndTimerRef.current) clearTimeout(moveEndTimerRef.current);
             moveEndTimerRef.current = setTimeout(() => {
@@ -364,18 +515,30 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
             setRegion(next);
             setCameraMoving(false);
             onRegionChangeRef.current?.(next);
+            scheduleSelectedScreenUpdate();
           }}
         >
-          {selectedId ? <AircraftTrail points={trail} /> : null}
-          {visibleFlights.map((flight) => (
-            <AircraftMarker
-              key={flight.fr24Id}
-              flight={flight}
-              selected={flight.fr24Id === selectedId}
-              onPress={onSelectFlight}
-            />
-          ))}
+          {selectedId ? <AircraftTrail points={displayTrail} /> : null}
+          {visibleFlights
+            .filter((flight) => flight.fr24Id !== selectedId)
+            .map((flight) => (
+              <AircraftMarker
+                key={flight.fr24Id}
+                flight={flight}
+                selected={false}
+                onPress={onSelectFlight}
+              />
+            ))}
         </MapView>
+
+        {selectedFlight && selectedScreenPos && markersEnabled ? (
+          <SelectedPlaneOverlay
+            flight={selectedFlight}
+            x={selectedScreenPos.x}
+            y={selectedScreenPos.y}
+            onPress={onSelectFlight}
+          />
+        ) : null}
 
         {/* Callsign badges: normal RN views, not Marker children */}
         {showBadgeLayer ? (
@@ -456,6 +619,17 @@ const WebFlightMap = forwardRef<FlightMapHandle, Props>(function WebFlightMap(
   const [region, setRegion] = useState<Region | null>(null);
   const activeRegion = region ?? bootRegion ?? hubRegion();
   const smoothed = useSmoothedFlights(flights);
+  const mapFlights = useMemo(
+    () => withRawSelectedPosition(smoothed, flights, selectedId),
+    [smoothed, flights, selectedId],
+  );
+  const selectedFlight = useMemo(
+    () =>
+      selectedId
+        ? mapFlights.find((f) => f.fr24Id === selectedId)
+        : undefined,
+    [mapFlights, selectedId],
+  );
 
   useEffect(() => {
     if (!bootRegion) return;
@@ -499,9 +673,18 @@ const WebFlightMap = forwardRef<FlightMapHandle, Props>(function WebFlightMap(
     return (deg / activeRegion.latitudeDelta) * size.h;
   };
 
+  const displayTrail = useMemo(() => {
+    if (!selectedFlight || !trail?.length) return trail;
+    return trailWithLivePosition(trail, {
+      lat: selectedFlight.latitude,
+      lng: selectedFlight.longitude,
+      alt: selectedFlight.altitude,
+    });
+  }, [trail, selectedFlight]);
+
   const trailSegments = useMemo(
-    () => (selectedId ? buildTrailSegments(trail) : []),
-    [selectedId, trail],
+    () => (selectedId ? buildTrailSegments(displayTrail) : []),
+    [selectedId, displayTrail],
   );
 
   if (!bootRegion) {
@@ -574,7 +757,7 @@ const WebFlightMap = forwardRef<FlightMapHandle, Props>(function WebFlightMap(
           );
         });
       })}
-      {smoothed.map((flight) => {
+      {mapFlights.map((flight) => {
         const { x, y } = project(flight.latitude, flight.longitude);
         if (x < -40 || y < -40 || x > size.w + 40 || y > size.h + 40) {
           return null;
@@ -588,11 +771,13 @@ const WebFlightMap = forwardRef<FlightMapHandle, Props>(function WebFlightMap(
             : flight.onGround
               ? colors.textDim
               : "#FFFFFF";
-        // SVG nose points up; rotation is true heading (no emoji −45° offset).
         const rotate = `${((flight.heading % 360) + 360) % 360}deg`;
         const showLabel =
           callsignsVisibleAtZoom(activeRegion) || selected || emergency;
-        const half = AIRCRAFT_ICON_SIZE / 2;
+        const { width, height, canvas } = aircraftIconLayout(
+          flight.aircraftCode,
+          AIRCRAFT_ICON_SIZE,
+        );
         return (
           <Pressable
             key={flight.fr24Id}
@@ -612,19 +797,29 @@ const WebFlightMap = forwardRef<FlightMapHandle, Props>(function WebFlightMap(
               style={[
                 styles.webPlane,
                 {
-                  left: -half,
-                  top: -half,
-                  width: AIRCRAFT_ICON_SIZE,
-                  height: AIRCRAFT_ICON_SIZE,
-                  transform: [{ rotate }],
+                  left: -canvas / 2,
+                  top: -canvas / 2,
+                  width: canvas,
+                  height: canvas,
                 },
               ]}
             >
-              <AircraftIcon
-                aircraftCode={flight.aircraftCode}
-                color={tint}
-                size={AIRCRAFT_ICON_SIZE}
-              />
+              <View
+                style={[
+                  styles.webPlaneInner,
+                  {
+                    width,
+                    height,
+                    transform: [{ rotate }],
+                  },
+                ]}
+              >
+                <AircraftIcon
+                  aircraftCode={flight.aircraftCode}
+                  color={tint}
+                  size={AIRCRAFT_ICON_SIZE}
+                />
+              </View>
             </View>
           </Pressable>
         );
@@ -664,6 +859,19 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 5,
     elevation: 5,
+  },
+  /** Selected aircraft — same projection as native Polylines via pointForCoordinate. */
+  planeOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 6,
+    elevation: 6,
+    overflow: "visible",
+  },
+  selectedPlane: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "visible",
   },
   /** Centered hit box above the plane; badge lays out intrinsically inside. */
   badgeAnchor: {
@@ -733,6 +941,7 @@ const styles = StyleSheet.create({
     width: 0,
     height: 0,
     alignItems: "center",
+    justifyContent: "center",
     overflow: "visible",
     zIndex: 2,
   },
@@ -745,5 +954,13 @@ const styles = StyleSheet.create({
     position: "absolute",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "visible",
+  },
+  webPlaneInner: {
+    alignItems: "center",
+    justifyContent: "center",
+    ...(Platform.OS === "web"
+      ? ({ transformOrigin: "center center" } as object)
+      : null),
   },
 });
