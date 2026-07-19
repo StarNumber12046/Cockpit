@@ -12,6 +12,7 @@ import {
   listStaticZones,
 } from "./bounds";
 import {
+  isSoftBlockedFeedBody,
   parseDetailsResponse,
   parseFeedResponse,
   parseSearchResponse,
@@ -43,12 +44,17 @@ function boolParam(value: boolean | undefined, fallback: string): string {
  */
 export class Fr24Client implements Fr24DataSource {
   private readonly fetchImpl: typeof globalThis.fetch;
+  private readonly headers: Record<string, string>;
   private readonly maxRetries: number;
   private readonly retryBaseMs: number;
   private readonly timeoutMs: number;
 
   constructor(config: Fr24ClientConfig = {}) {
     this.fetchImpl = config.fetch ?? globalThis.fetch.bind(globalThis);
+    // When `headers` is set, use that set exactly (mobile drops sec-fetch-* on native).
+    this.headers = config.headers
+      ? { ...config.headers }
+      : { ...FR24_HEADERS };
     this.maxRetries = config.maxRetries ?? 2;
     this.retryBaseMs = config.retryBaseMs ?? 500;
     this.timeoutMs = config.timeoutMs ?? 15_000;
@@ -83,6 +89,12 @@ export class Fr24Client implements Fr24DataSource {
     // Append bounds with literal commas after URLSearchParams encoding.
     const url = `${URLS.feed}?${params.toString()}&bounds=${bounds}`;
     const json = await this.requestJson(url);
+    if (isSoftBlockedFeedBody(json)) {
+      throw new Fr24Error(
+        "FR24 soft-blocked this client (metadata-only feed response)",
+        "blocked",
+      );
+    }
     return parseFeedResponse(json);
   }
 
@@ -135,7 +147,7 @@ export class Fr24Client implements Fr24DataSource {
         try {
           response = await this.fetchImpl(url, {
             method: "GET",
-            headers: FR24_HEADERS,
+            headers: this.headers,
             signal: controller.signal,
           });
         } finally {

@@ -142,6 +142,8 @@ type AirportDetail = {
 export type Fr24ClientConfig = {
   /** Override fetch implementation (tests / adapters). */
   fetch?: typeof globalThis.fetch;
+  /** Replace default FR24_HEADERS entirely when set (e.g. lean native header set). */
+  headers?: Record<string, string>;
   /** Max retries for transient errors (429 / 5xx / network). Default 2. */
   maxRetries?: number;
   /** Base delay ms for exponential backoff. Default 500. */
@@ -157,6 +159,7 @@ export type Fr24ErrorCode =
   | "cloudflare"
   | "http"
   | "parse"
+  | "blocked"
   | "unknown";
 
 export class Fr24Error extends Error {

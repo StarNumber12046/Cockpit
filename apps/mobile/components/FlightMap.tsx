@@ -19,8 +19,10 @@ import {
 import MapView, { PROVIDER_DEFAULT, type Region } from "react-native-maps";
 import type { Fr24Flight, Fr24FlightDetails } from "@cockpit/fr24";
 import { isEmergencySquawk } from "@cockpit/shared";
-import { HUB } from "../constants/config";
+import { HUB, MAP_BOUNDS_SETTLE_MS } from "../constants/config";
 import { DARK_MAP_STYLE, radiusToLatitudeDelta } from "../constants/mapStyle";
+import { debugLog } from "../lib/debug";
+import { isValidFeedRegion } from "../lib/mapRegion";
 import { colors, radius, spacing, typography } from "../constants/theme";
 import { useLiveTrail } from "../hooks/useLiveTrail";
 import { useSmoothedFlights } from "../hooks/useSmoothedFlights";
@@ -57,6 +59,8 @@ type Props = {
   onSelectFlight: (flight: Fr24Flight | null) => void;
   /** Fires when the visible map region settles (pan/zoom end) or on first layout. */
   onRegionChange?: (region: Region) => void;
+  /** True while the user is panning/zooming — use to pause FR24 feed requests. */
+  onCameraMovingChange?: (moving: boolean) => void;
 };
 
 /**
@@ -176,7 +180,15 @@ function SelectedPlaneOverlay({
  *    (Text/Image work normally — no Marker bitmap clipping)
  */
 export const FlightMap = forwardRef<FlightMapHandle, Props>(function FlightMap(
-  { flights, selectedId, trail, selectedDetail, onSelectFlight, onRegionChange },
+  {
+    flights,
+    selectedId,
+    trail,
+    selectedDetail,
+    onSelectFlight,
+    onRegionChange,
+    onCameraMovingChange,
+  },
   ref,
 ) {
   if (Platform.OS === "web") {
@@ -189,6 +201,7 @@ export const FlightMap = forwardRef<FlightMapHandle, Props>(function FlightMap(
         selectedDetail={selectedDetail}
         onSelectFlight={onSelectFlight}
         onRegionChange={onRegionChange}
+        onCameraMovingChange={onCameraMovingChange}
       />
     );
   }
@@ -202,6 +215,7 @@ export const FlightMap = forwardRef<FlightMapHandle, Props>(function FlightMap(
       selectedDetail={selectedDetail}
       onSelectFlight={onSelectFlight}
       onRegionChange={onRegionChange}
+      onCameraMovingChange={onCameraMovingChange}
     />
   );
 });
@@ -249,12 +263,15 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
       selectedDetail,
       onSelectFlight,
       onRegionChange,
+      onCameraMovingChange,
     },
     ref,
   ) {
     const mapRef = useRef<MapView>(null);
     const onRegionChangeRef = useRef(onRegionChange);
     onRegionChangeRef.current = onRegionChange;
+    const onCameraMovingChangeRef = useRef(onCameraMovingChange);
+    onCameraMovingChangeRef.current = onCameraMovingChange;
     const {
       permitted: userLocationPermitted,
       coords,
@@ -271,10 +288,12 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
     const [region, setRegion] = useState<Region | null>(null);
     const [mapSize, setMapSize] = useState({ w: 0, h: 0 });
     /** Hide overlay labels while the camera is moving — avoids snappy lag vs tiles. */
-    const [cameraMoving, setCameraMoving] = useState(false);
+    const [cameraMoving, setCameraMovingState] = useState(false);
     const regionRef = useRef<Region | null>(null);
     const regionRafRef = useRef<number | null>(null);
     const moveEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const feedBoundsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const cameraMovingRef = useRef(false);
 
     // Smooth poll snaps so planes/badges glide instead of teleporting.
     const mapFlights = useSmoothedFlights(flights);
@@ -317,9 +336,40 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
     }, [markersEnabled, markerCap]);
 
     useEffect(() => {
-      if (!bootRegion) return;
+      if (!bootRegion || !isValidFeedRegion(bootRegion)) return;
       onRegionChangeRef.current?.(bootRegion);
     }, [bootRegion]);
+
+    const publishCameraMoving = useCallback((moving: boolean) => {
+      if (cameraMovingRef.current === moving) return;
+      cameraMovingRef.current = moving;
+      setCameraMovingState(moving);
+      onCameraMovingChangeRef.current?.(moving);
+    }, []);
+
+    const clearFeedBoundsTimer = useCallback(() => {
+      if (feedBoundsTimerRef.current) {
+        clearTimeout(feedBoundsTimerRef.current);
+        feedBoundsTimerRef.current = null;
+      }
+    }, []);
+
+    const scheduleFeedBounds = useCallback(
+      (next: Region) => {
+        clearFeedBoundsTimer();
+        feedBoundsTimerRef.current = setTimeout(() => {
+          feedBoundsTimerRef.current = null;
+          debugLog("map", "feed bounds scheduled (settled)", {
+            lat: next.latitude,
+            lon: next.longitude,
+            latDelta: next.latitudeDelta,
+            lonDelta: next.longitudeDelta,
+          });
+          onRegionChangeRef.current?.(next);
+        }, MAP_BOUNDS_SETTLE_MS);
+      },
+      [clearFeedBoundsTimer],
+    );
 
     useEffect(() => {
       return () => {
@@ -327,8 +377,9 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
           cancelAnimationFrame(regionRafRef.current);
         }
         if (moveEndTimerRef.current) clearTimeout(moveEndTimerRef.current);
+        clearFeedBoundsTimer();
       };
-    }, []);
+    }, [clearFeedBoundsTimer]);
 
     const visibleFlights = useMemo(() => {
       if (!markersEnabled) return [];
@@ -424,19 +475,21 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
       const latitude = coords?.latitude ?? HUB.latitude;
       const longitude = coords?.longitude ?? HUB.longitude;
       const next = regionAround(latitude, longitude, HUB.radiusMeters);
+      publishCameraMoving(true);
+      clearFeedBoundsTimer();
       mapRef.current?.animateToRegion(next, 450);
       regionRef.current = next;
       setRegion(next);
-      onRegionChangeRef.current?.(next);
-    }, [coords]);
+    }, [clearFeedBoundsTimer, coords, publishCameraMoving]);
 
     const flyTo = useCallback((latitude: number, longitude: number) => {
       const next = regionAround(latitude, longitude, HUB.radiusMeters);
+      publishCameraMoving(true);
+      clearFeedBoundsTimer();
       mapRef.current?.animateToRegion(next, 450);
       regionRef.current = next;
       setRegion(next);
-      onRegionChangeRef.current?.(next);
-    }, []);
+    }, [clearFeedBoundsTimer, publishCameraMoving]);
 
     useImperativeHandle(
       ref,
@@ -486,21 +539,33 @@ const NativeFlightMap = forwardRef<FlightMapHandle, Props>(
             console.log("[cockpit] map ready");
           }}
           onRegionChange={(next) => {
-            setCameraMoving(true);
+            publishCameraMoving(true);
+            clearFeedBoundsTimer();
             scheduleRegionPaint(next);
             scheduleSelectedScreenUpdate();
             // Fallback if complete doesn't fire (some Android builds).
             if (moveEndTimerRef.current) clearTimeout(moveEndTimerRef.current);
             moveEndTimerRef.current = setTimeout(() => {
-              setCameraMoving(false);
+              publishCameraMoving(false);
             }, 180);
           }}
           onRegionChangeComplete={(next) => {
             if (moveEndTimerRef.current) clearTimeout(moveEndTimerRef.current);
             regionRef.current = next;
             setRegion(next);
-            setCameraMoving(false);
-            onRegionChangeRef.current?.(next);
+            publishCameraMoving(false);
+            const valid = isValidFeedRegion(next);
+            debugLog("map", "region change complete", {
+              mapReady,
+              valid,
+              lat: next.latitude,
+              lon: next.longitude,
+              latDelta: next.latitudeDelta,
+              lonDelta: next.longitudeDelta,
+            });
+            if (mapReady && valid) {
+              scheduleFeedBounds(next);
+            }
             scheduleSelectedScreenUpdate();
           }}
         >
@@ -602,12 +667,15 @@ const WebFlightMap = forwardRef<FlightMapHandle, Props>(function WebFlightMap(
     selectedDetail,
     onSelectFlight,
     onRegionChange,
+    onCameraMovingChange,
   },
   ref,
 ) {
   const [size, setSize] = useState({ w: 1, h: 1 });
   const onRegionChangeRef = useRef(onRegionChange);
   onRegionChangeRef.current = onRegionChange;
+  const onCameraMovingChangeRef = useRef(onCameraMovingChange);
+  onCameraMovingChangeRef.current = onCameraMovingChange;
   const { coords: userCoords, status } = useUserLocation(true);
   const bootRegion = useBootRegion(userCoords, status);
   const [region, setRegion] = useState<Region | null>(null);
@@ -622,7 +690,7 @@ const WebFlightMap = forwardRef<FlightMapHandle, Props>(function WebFlightMap(
   );
 
   useEffect(() => {
-    if (!bootRegion) return;
+    if (!bootRegion || !isValidFeedRegion(bootRegion)) return;
     setRegion(bootRegion);
     onRegionChangeRef.current?.(bootRegion);
   }, [bootRegion]);
@@ -631,13 +699,17 @@ const WebFlightMap = forwardRef<FlightMapHandle, Props>(function WebFlightMap(
     const latitude = userCoords?.latitude ?? HUB.latitude;
     const longitude = userCoords?.longitude ?? HUB.longitude;
     const next = regionAround(latitude, longitude, HUB.radiusMeters);
+    onCameraMovingChangeRef.current?.(true);
     setRegion(next);
+    onCameraMovingChangeRef.current?.(false);
     onRegionChangeRef.current?.(next);
   }, [userCoords]);
 
   const flyTo = useCallback((latitude: number, longitude: number) => {
     const next = regionAround(latitude, longitude, HUB.radiusMeters);
+    onCameraMovingChangeRef.current?.(true);
     setRegion(next);
+    onCameraMovingChangeRef.current?.(false);
     onRegionChangeRef.current?.(next);
   }, []);
 

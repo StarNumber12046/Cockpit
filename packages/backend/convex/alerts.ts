@@ -97,6 +97,7 @@ const squawkReportArgs = v.object({
   positionTime: v.number(),
   onGround: v.boolean(),
   flightStartedAt: v.optional(v.number()),
+  missingFromFeed: v.optional(v.boolean()),
 });
 
 /**
@@ -165,6 +166,7 @@ export const reportSquawkClearances = mutation({
       positionTime: number;
       onGround: boolean;
       flightStartedAt?: number;
+      missingFromFeed?: boolean;
     }> = [];
 
     const bumpSkip = (reason: string) => {

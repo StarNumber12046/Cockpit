@@ -5,6 +5,7 @@ import { internal } from "./_generated/api";
 import { internalAction, internalMutation } from "./_generated/server";
 import { createAlertIfNew } from "./lib/alertCreate";
 import {
+  crossCheckFlightMissingFromFeed,
   crossCheckSquawkClearedOnFeed,
   crossCheckSquawkOnFeed,
 } from "./lib/fr24SquawkCheck";
@@ -29,6 +30,7 @@ const squawkReportValidator = v.object({
   positionTime: v.number(),
   onGround: v.boolean(),
   flightStartedAt: v.optional(v.number()),
+  missingFromFeed: v.optional(v.boolean()),
 });
 
 const verifiedReportValidator = v.object({
@@ -228,39 +230,48 @@ export const verifyAndClearAlerts = internalAction({
         continue;
       }
 
-      let detail;
-      try {
-        detail = await client.getFlightDetails(structural.report.fr24Id);
-      } catch {
-        bumpSkip("fr24_details_failed");
-        continue;
+      let cross;
+      if (structural.report.missingFromFeed) {
+        console.log(
+          `[squawk] flight missing from feed, accepting clearance: ${structural.report.fr24Id} (${structural.report.icao24})`,
+        );
+        cross = crossCheckFlightMissingFromFeed(structural.report);
+      } else {
+        let detail;
+        try {
+          detail = await client.getFlightDetails(structural.report.fr24Id);
+        } catch {
+          bumpSkip("fr24_details_failed");
+          continue;
+        }
+
+        const trail = detail.trail;
+        const lastPoint = trail?.[trail.length - 1];
+        if (
+          lastPoint?.lat == null ||
+          lastPoint.lng == null ||
+          !Number.isFinite(lastPoint.lat) ||
+          !Number.isFinite(lastPoint.lng)
+        ) {
+          bumpSkip("no_position");
+          continue;
+        }
+
+        let feedFlights;
+        try {
+          const bounds = getBoundsByPoint(lastPoint.lat, lastPoint.lng, 50_000);
+          feedFlights = await client.getFlights(bounds, { limit: 200 });
+        } catch {
+          bumpSkip("fr24_feed_failed");
+          continue;
+        }
+
+        const feedFlight = feedFlights.find(
+          (f) => f.fr24Id === structural.report.fr24Id,
+        );
+        cross = crossCheckSquawkClearedOnFeed(structural.report, feedFlight);
       }
 
-      const trail = detail.trail;
-      const lastPoint = trail?.[trail.length - 1];
-      if (
-        lastPoint?.lat == null ||
-        lastPoint.lng == null ||
-        !Number.isFinite(lastPoint.lat) ||
-        !Number.isFinite(lastPoint.lng)
-      ) {
-        bumpSkip("no_position");
-        continue;
-      }
-
-      let feedFlights;
-      try {
-        const bounds = getBoundsByPoint(lastPoint.lat, lastPoint.lng, 50_000);
-        feedFlights = await client.getFlights(bounds, { limit: 200 });
-      } catch {
-        bumpSkip("fr24_feed_failed");
-        continue;
-      }
-
-      const feedFlight = feedFlights.find(
-        (f) => f.fr24Id === structural.report.fr24Id,
-      );
-      const cross = crossCheckSquawkClearedOnFeed(structural.report, feedFlight);
       if (!cross.ok) {
         bumpSkip(cross.reason);
         continue;
@@ -276,6 +287,9 @@ export const verifyAndClearAlerts = internalAction({
 
       if (result.removed > 0) {
         cleared += 1;
+        console.log(
+          `[squawk] cleared ${result.removed} alert(s) for ${cross.report.fr24Id}`,
+        );
       } else {
         bumpSkip("no_matching_alerts");
       }

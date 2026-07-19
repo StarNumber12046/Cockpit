@@ -5,4 +5,12 @@ import { convexAuth } from "@convex-dev/auth/server";
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
   providers: [Google, GitHub, Discord],
+  callbacks: {
+    async redirect({ redirectTo }) {
+      console.log(redirectTo);
+      if (redirectTo.startsWith("cockpit://")) return redirectTo;
+      if (redirectTo.startsWith("exp+")) return redirectTo;
+      return "/";
+    },
+  },
 });

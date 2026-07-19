@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../../lib/convex";
 import {
@@ -30,12 +30,12 @@ import {
   type TrailPointLike,
 } from "../../lib/altitudeColor";
 import { searchHitCoordinates } from "../../lib/searchCoords";
+import { debugLog, debugWarn } from "../../lib/debug";
+import { isValidFeedRegion } from "../../lib/mapRegion";
 import { isValidMapCoordinate } from "../../components/AircraftMarker";
 
 /** Ignore tiny region noise so pan jitter does not thrash the FR24 feed. */
 const REGION_EPSILON = 1e-5;
-/** Debounce after pan/zoom settles before swapping feed bounds. */
-const BOUNDS_DEBOUNCE_MS = 350;
 /** Debounce FR24 search while typing. */
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -68,32 +68,52 @@ export default function HomeScreen() {
   const mapRef = useRef<FlightMapHandle>(null);
   const alerts = useQuery(api.alerts.list, { limit: 50 });
   const tracked = useQuery(api.tracked.list);
+  const reportSquawkClearances = useMutation(api.alerts.reportSquawkClearances);
   /** null until the map publishes its startup region (user location or hub). */
   const [bounds, setBounds] = useState<BoundsString | null>(null);
+  const [mapCameraMoving, setMapCameraMoving] = useState(false);
   const lastRegionRef = useRef<MapRegion | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const onCameraMovingChange = useCallback((moving: boolean) => {
+    setMapCameraMoving(moving);
+    if (moving) {
+      debugLog("map", "camera moving — feed paused");
+    } else {
+      debugLog("map", "camera settled — feed can resume");
+    }
+  }, []);
+
   const onRegionChange = useCallback((region: MapRegion) => {
+    if (!isValidFeedRegion(region)) {
+      debugLog("map", "region ignored (invalid feed span)", {
+        lat: region.latitude,
+        lon: region.longitude,
+        latDelta: region.latitudeDelta,
+        lonDelta: region.longitudeDelta,
+      });
+      return;
+    }
+
     const prev = lastRegionRef.current;
     if (prev && regionsEqual(prev, region)) return;
     lastRegionRef.current = region;
 
-    // First region (boot camera): apply immediately so the feed matches startup.
-    if (!prev) {
-      setBounds(regionToBounds(region));
-      return;
-    }
+    const nextBounds = regionToBounds(region);
+    const isBoot = !prev;
 
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      setBounds(regionToBounds(region));
-    }, BOUNDS_DEBOUNCE_MS);
+    debugLog("map", isBoot ? "boot bounds" : "bounds updated (settled)", {
+      bounds: nextBounds,
+      lat: region.latitude,
+      lon: region.longitude,
+      latDelta: region.latitudeDelta,
+      lonDelta: region.longitudeDelta,
+    });
+    setBounds(nextBounds);
   }, []);
 
   useEffect(() => {
     return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
   }, []);
@@ -114,6 +134,7 @@ export default function HomeScreen() {
     useFr24Flights({
       bounds: bounds ?? undefined,
       enabled: bounds != null,
+      paused: mapCameraMoving,
     });
   useSquawkReporter(flights, bounds != null);
   const [selected, setSelected] = useState<Fr24Flight | null>(null);
@@ -125,7 +146,7 @@ export default function HomeScreen() {
     console.log(
       `[cockpit] live map: ${flights.length} flights` +
         (loading ? " (loading)" : "") +
-        (error ? ` error=${error}` : ""),
+        (error && flights.length === 0 ? ` error=${error}` : ""),
     );
   }, [flights.length, loading, error]);
 
@@ -270,6 +291,45 @@ export default function HomeScreen() {
     setOffMapCallsign(item.callsign ?? "");
   };
 
+  const reportedDetailErrorsRef = useRef(new Set<string>());
+
+  const onOffMapDetailError = useCallback(
+    (fr24Id: string) => {
+      if (reportedDetailErrorsRef.current.has(fr24Id)) return;
+      reportedDetailErrorsRef.current.add(fr24Id);
+
+      const alert = alerts?.find((a) => a.fr24Id === fr24Id);
+      const icao24 = alert?.icao24 ?? "";
+      if (!icao24) {
+        debugWarn("squawk", "off-map detail failed but no icao24 in alert", {
+          fr24Id,
+        });
+        return;
+      }
+
+      debugLog("squawk", "off-map detail fetch failed, reporting clearance", {
+        fr24Id,
+        icao24,
+      });
+
+      void reportSquawkClearances({
+        clearances: [
+          {
+            fr24Id,
+            icao24,
+            squawk: "",
+            positionTime: Date.now(),
+            onGround: true,
+            missingFromFeed: true,
+          },
+        ],
+      }).catch(() => {
+        reportedDetailErrorsRef.current.delete(fr24Id);
+      });
+    },
+    [alerts, reportSquawkClearances],
+  );
+
   return (
     <View style={styles.screen}>
       <FlightMap
@@ -280,6 +340,7 @@ export default function HomeScreen() {
         selectedDetail={selectedDetail}
         onSelectFlight={(f) => { setSelected(f); setOffMapFlightId(null); }}
         onRegionChange={onRegionChange}
+        onCameraMovingChange={onCameraMovingChange}
       />
 
       <View
@@ -307,7 +368,7 @@ export default function HomeScreen() {
           />
         ) : null}
 
-        {error ? (
+        {error && flights.length === 0 ? (
           <ErrorBanner message={error} onRetry={() => void refresh()} />
         ) : null}
 
@@ -330,6 +391,7 @@ export default function HomeScreen() {
         offMapFlightNumber={offMapFlightNumber}
         offMapCallsign={offMapCallsign}
         onOffMapLocationReady={onOffMapLocationReady}
+        onOffMapDetailError={onOffMapDetailError}
       />
 
       <ChromeSheet

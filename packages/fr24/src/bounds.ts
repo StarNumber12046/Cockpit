@@ -84,6 +84,35 @@ export function getBoundsFromRegion(
   });
 }
 
+/** Minimum map span (degrees) before FR24 feed requests are worthwhile. */
+const MIN_BOUNDS_SPAN_DEG = 0.05;
+
+/**
+ * Reject degenerate FR24 bounds (zero-area / NaN).
+ * FR24 returns global `full_count` with no rows for these — not a reliable block signal.
+ */
+export function isValidBounds(bounds: BoundsString): boolean {
+  const parts = bounds.split(",");
+  if (parts.length !== 4) return false;
+
+  const nums = parts.map((p) => Number(p.trim()));
+  if (nums.some((n) => !Number.isFinite(n))) return false;
+
+  const [tlY, brY, tlX, brX] = nums as [number, number, number, number];
+  if (tlY <= brY || tlX >= brX) return false;
+
+  const latSpan = tlY - brY;
+  const lonSpan = brX - tlX;
+  if (latSpan < MIN_BOUNDS_SPAN_DEG || lonSpan < MIN_BOUNDS_SPAN_DEG) {
+    return false;
+  }
+  if (latSpan > 90 || lonSpan > 180) return false;
+  if (Math.abs(tlY) > 90 || Math.abs(brY) > 90) return false;
+  if (Math.abs(tlX) > 180 || Math.abs(brX) > 180) return false;
+
+  return true;
+}
+
 /** Default v1 hub-centered bounds (KORD). */
 export function getDefaultBounds(): BoundsString {
   return getBoundsByPoint(

@@ -36,10 +36,30 @@ export default function SignInScreen() {
     setLoading(provider);
     try {
       const redirectTo = AuthSession.makeRedirectUri({ scheme: "cockpit" });
-      await signIn(provider, { redirectTo });
-      // On success the ConvexAuthProvider will update isAuthenticated and the
-      // router can navigate back. The modal dismisses automatically when the
-      // parent detects the auth state change.
+
+      // Step 1: Initiate OAuth — this returns a redirect URL on React Native.
+      const { redirect } = await signIn(provider, { redirectTo });
+
+      if (redirect) {
+        // Step 2: Open the OAuth provider in an in-app browser.
+        const result = await WebBrowser.openAuthSessionAsync(
+          redirect.toString(),
+          redirectTo
+        );
+
+        // Step 3: When the OAuth provider redirects back, extract the code
+        // and complete sign-in by passing the code to signIn().
+        if (result.type === "success" && result.url) {
+          const url = new URL(result.url);
+          const code = url.searchParams.get("code");
+          if (code) {
+            await signIn(provider, { code });
+          }
+        }
+      }
+
+      // On success the ConvexAuthProvider will update isAuthenticated.
+      // The modal will be dismissed by the parent layout when auth state changes.
       if (router.canGoBack()) router.back();
     } catch (err) {
       console.warn("[sign-in] OAuth error:", err);

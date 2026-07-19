@@ -103,6 +103,19 @@ export function mapFeedRow(fr24Id: string, info: unknown): Fr24Flight | null {
   };
 }
 
+/**
+ * FR24 soft-block: HTTP 200 with only global metadata (`full_count`, `version`)
+ * and no aircraft rows. Same pattern from datacenter IPs (Convex) and blocked natives.
+ */
+export function isSoftBlockedFeedBody(content: unknown): boolean {
+  if (content == null || typeof content !== "object" || Array.isArray(content)) {
+    return false;
+  }
+  const obj = content as Record<string, unknown>;
+  if (Object.keys(obj).some(isFlightId)) return false;
+  return "full_count" in obj;
+}
+
 export function parseFeedResponse(content: unknown): Fr24Flight[] {
   if (content == null || typeof content !== "object") return [];
 

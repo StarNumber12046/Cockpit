@@ -35,7 +35,9 @@ export type SquawkReportInput = {
   flightStartedAt?: number;
 };
 
-export type SquawkClearanceInput = Omit<SquawkReportInput, "flightStartedAt">;
+export type SquawkClearanceInput = Omit<SquawkReportInput, "flightStartedAt"> & {
+  missingFromFeed?: boolean;
+};
 
 export type StructuralSquawkClearance = {
   fr24Id: string;
@@ -45,6 +47,7 @@ export type StructuralSquawkClearance = {
   callsign?: string;
   flightNumber?: string;
   onGround: boolean;
+  missingFromFeed?: boolean;
 };
 
 export type VerifiedSquawkReport = SquawkReportInput & {
@@ -67,6 +70,7 @@ export type StructuralSquawkReport = Omit<
   icao24: string;
   squawk: string;
   positionTimeMs: number;
+  missingFromFeed?: boolean;
 };
 
 export type StructuralSquawkResult =
@@ -133,7 +137,7 @@ export function validateSquawkReportInput(
   };
 }
 
-/** Client clearance: aircraft visible with a non-emergency squawk. */
+/** Client clearance: aircraft visible with a non-emergency squawk, or missing from feed. */
 export function validateSquawkClearanceInput(
   report: SquawkClearanceInput,
 ): StructuralSquawkResult | { ok: false; reason: string } {
@@ -144,11 +148,11 @@ export function validateSquawkClearanceInput(
   );
   if (!identity.ok) return identity;
 
-  if (isEmergencySquawk(report.squawk)) {
+  if (!report.missingFromFeed && isEmergencySquawk(report.squawk)) {
     return { ok: false, reason: "still_emergency_squawk" };
   }
 
-  const squawk = normalizeSquawk(report.squawk);
+  const squawk = report.missingFromFeed ? "0000" : normalizeSquawk(report.squawk);
   return {
     ok: true,
     report: {
@@ -160,6 +164,7 @@ export function validateSquawkClearanceInput(
       positionTime: report.positionTime,
       onGround: report.onGround,
       positionTimeMs: identity.positionTimeMs,
+      missingFromFeed: report.missingFromFeed,
     },
   };
 }

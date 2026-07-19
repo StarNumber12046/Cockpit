@@ -7,7 +7,7 @@
     "orientation": "portrait",
     "scheme": "cockpit",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "icon": "./assets/icon.png",
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -27,10 +27,7 @@
         "backgroundColor": "#0B1220"
       },
       "package": "com.cockpit.app",
-      "permissions": [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
-      ]
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
     },
     "web": {
       "bundler": "metro",
@@ -57,6 +54,14 @@
             "./assets/fonts/FontAwesome.ttf",
             "./assets/fonts/RobotoFlex.ttf"
           ]
+        }
+      ],
+      [
+        "expo-cronet",
+        {
+          "provider": "play-services",
+          "enableHttp2": true,
+          "enableQuic": true
         }
       ]
     ],

@@ -1,15 +1,14 @@
 import { v } from "convex/values";
 import { internalQuery, mutation, query } from "./_generated/server";
 import { normalizeHex } from "./lib/flightSession";
-import { Id } from "./_generated/dataModel";
+import { getAuthUserId } from "@convex-dev/auth/server";
 
 /** Returns this user's tracked flights. Returns [] when not authenticated. */
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return [];
-    const userId = identity.subject as Id<"users">;
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return [];
     return await ctx.db
       .query("trackedFlights")
       .withIndex("by_userId", (q) => q.eq("userId", userId))
@@ -28,9 +27,8 @@ export const add = mutation({
     flightStartedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Not authenticated");
-    const userId = identity.subject as Id<"users">;
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
 
     const flightNumber = args.flightNumber.replace(/\s+/g, "").toUpperCase();
     if (!flightNumber) {
@@ -81,12 +79,12 @@ export const remove = mutation({
     id: v.id("trackedFlights"),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Not authenticated");
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Not authenticated");
 
     const row = await ctx.db.get(args.id);
     if (!row) throw new Error("Not found");
-    if (row.userId !== (identity.subject as Id<"users">)) {
+    if (row.userId !== userId) {
       throw new Error("Unauthorized");
     }
 

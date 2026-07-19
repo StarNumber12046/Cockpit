@@ -110,3 +110,16 @@ export function crossCheckSquawkClearedOnFeed(
     },
   };
 }
+
+/** Accept clearance when flight is missing from the FR24 feed. */
+export function crossCheckFlightMissingFromFeed(
+  report: StructuralSquawkClearance,
+): Fr24SquawkClearanceResult {
+  return {
+    ok: true,
+    report: {
+      ...report,
+      missingFromFeed: true,
+    },
+  };
+}

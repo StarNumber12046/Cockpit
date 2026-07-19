@@ -15,6 +15,7 @@ import type * as alerts from "../alerts.js";
 import type * as auth from "../auth.js";
 import type * as crons from "../crons.js";
 import type * as flightSessions from "../flightSessions.js";
+import type * as fr24Live from "../fr24Live.js";
 import type * as http from "../http.js";
 import type * as lib_airframesClient from "../lib/airframesClient.js";
 import type * as lib_alertCreate from "../lib/alertCreate.js";
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   crons: typeof crons;
   flightSessions: typeof flightSessions;
+  fr24Live: typeof fr24Live;
   http: typeof http;
   "lib/airframesClient": typeof lib_airframesClient;
   "lib/alertCreate": typeof lib_alertCreate;

@@ -21,6 +21,13 @@ config.resolver.nodeModulesPaths = [
   path.resolve(monorepoRoot, "node_modules"),
 ];
 
+// Enable package exports resolution for packages that only expose
+// an "exports" field (e.g. is-network-error used by @convex-dev/auth).
+config.resolver.unstable_enablePackageExports = true;
+// is-network-error only exports a "default" condition; Metro only looks for
+// "require" by default, so add "default" as a fallback.
+config.resolver.unstable_conditionNames = ["require", "import", "default"];
+
 // Cap workers so transform doesn't thrash RAM on Windows.
 config.maxWorkers = Math.min(3, Math.max(1, (os.cpus()?.length ?? 4) - 1));
 

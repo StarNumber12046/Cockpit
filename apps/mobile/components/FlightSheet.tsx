@@ -48,6 +48,8 @@ type Props = {
   offMapCallsign?: string;
   /** Called when an off-map flight's coordinates become available so the map can fly to it. */
   onOffMapLocationReady?: (lat: number, lng: number) => void;
+  /** Called when the off-map detail fetch fails (flight may no longer exist). */
+  onOffMapDetailError?: (fr24Id: string) => void;
 };
 
 const SWIPE_CLOSE_DISTANCE = 64;
@@ -112,6 +114,7 @@ export function FlightSheet({
   offMapFlightNumber,
   offMapCallsign,
   onOffMapLocationReady,
+  onOffMapDetailError,
 }: Props) {
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useConvexAuth();
@@ -123,6 +126,17 @@ export function FlightSheet({
   const resolvedLoading = flight ? detailLoading : offMap.loading;
   const resolvedError = flight ? detailError : offMap.error;
   const resolvedRefresh = flight ? onRefreshDetail : offMap.refresh;
+
+  const lastReportedErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    lastReportedErrorRef.current = null;
+  }, [offMapFlightId]);
+  useEffect(() => {
+    if (!offMapFlightId || flight || !offMap.error) return;
+    if (lastReportedErrorRef.current === offMapFlightId) return;
+    lastReportedErrorRef.current = offMapFlightId;
+    onOffMapDetailError?.(offMapFlightId);
+  }, [offMapFlightId, flight, offMap.error, onOffMapDetailError]);
   const screenHeight = Dimensions.get("window").height;
   const expandedHeight = screenHeight - EXPANDED_TOP_OFFSET;
   const emergency = flight ? isEmergencySquawk(flight.squawk) : false;

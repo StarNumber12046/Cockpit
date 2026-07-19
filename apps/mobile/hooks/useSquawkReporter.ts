@@ -3,6 +3,7 @@ import { useMutation } from "convex/react";
 import { type Fr24Flight } from "@cockpit/fr24";
 import { isEmergencySquawk } from "@cockpit/shared";
 import { api } from "../lib/convex";
+import { debugLog } from "../lib/debug";
 
 type SquawkObservation = {
   fr24Id: string;
@@ -12,6 +13,13 @@ type SquawkObservation = {
   flightNumber?: string;
   positionTime: number;
   onGround: boolean;
+  missingFromFeed?: boolean;
+};
+
+type WatchedFlight = {
+  icao24: string;
+  callsign?: string;
+  flightNumber?: string;
 };
 
 function reportKey(fr24Id: string, squawk: string): string {
@@ -34,7 +42,7 @@ export function useSquawkReporter(flights: Fr24Flight[], enabled = true) {
   const reportSquawks = useMutation(api.alerts.reportSquawks);
   const reportSquawkClearances = useMutation(api.alerts.reportSquawkClearances);
   const reported = useRef(new Set<string>());
-  const watching = useRef(new Set<string>());
+  const watching = useRef(new Map<string, WatchedFlight>());
   const cleared = useRef(new Set<string>());
 
   useEffect(() => {
@@ -42,6 +50,29 @@ export function useSquawkReporter(flights: Fr24Flight[], enabled = true) {
 
     const emergencies: SquawkObservation[] = [];
     const clearances: SquawkObservation[] = [];
+
+    const seenFr24Ids = new Set(flights.map((f) => f.fr24Id));
+
+    for (const [fr24Id, identity] of watching.current) {
+      if (seenFr24Ids.has(fr24Id) || cleared.current.has(fr24Id)) continue;
+
+      debugLog("squawk", "flight disappeared from feed, reporting clearance", {
+        fr24Id,
+        icao24: identity.icao24,
+      });
+
+      clearances.push({
+        fr24Id,
+        icao24: identity.icao24,
+        squawk: "",
+        callsign: identity.callsign,
+        flightNumber: identity.flightNumber,
+        positionTime: Date.now(),
+        onGround: true,
+        missingFromFeed: true,
+      });
+      cleared.current.add(fr24Id);
+    }
 
     for (const flight of flights) {
       const emergency = isEmergencySquawk(flight.squawk) && !flight.onGround;
@@ -72,9 +103,17 @@ export function useSquawkReporter(flights: Fr24Flight[], enabled = true) {
     }
 
     if (emergencies.length > 0) {
+      debugLog("squawk", `reporting ${emergencies.length} emergency squawk(s)`, {
+        fr24Ids: emergencies.map((e) => e.fr24Id),
+      });
+
       for (const report of emergencies) {
         reported.current.add(reportKey(report.fr24Id, report.squawk));
-        watching.current.add(report.fr24Id);
+        watching.current.set(report.fr24Id, {
+          icao24: report.icao24,
+          callsign: report.callsign,
+          flightNumber: report.flightNumber,
+        });
       }
 
       void reportSquawks({ reports: emergencies }).catch(() => {
@@ -86,6 +125,11 @@ export function useSquawkReporter(flights: Fr24Flight[], enabled = true) {
     }
 
     if (clearances.length === 0) return;
+
+    debugLog("squawk", `reporting ${clearances.length} clearance(s)`, {
+      fr24Ids: clearances.map((c) => c.fr24Id),
+      missingFromFeed: clearances.some((c) => c.missingFromFeed),
+    });
 
     void reportSquawkClearances({ clearances })
       .then(() => {

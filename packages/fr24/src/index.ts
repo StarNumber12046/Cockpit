@@ -5,6 +5,7 @@ export {
   getBoundsFromRegion,
   getDefaultBounds,
   getStaticZoneBounds,
+  isValidBounds,
   listStaticZones,
 } from "./bounds";
 export {
@@ -20,6 +21,7 @@ export {
   parseDetailsResponse,
   parseSearchResponse,
   isFlightId,
+  isSoftBlockedFeedBody,
 } from "./parse";
 export type {
   BoundsString,

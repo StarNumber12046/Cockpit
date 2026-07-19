@@ -1,5 +1,7 @@
 import { useCallback, useState } from "react";
-import { Fr24Error, fr24, type Fr24SearchResults } from "@cockpit/fr24";
+import { Fr24Error, type Fr24SearchResults } from "@cockpit/fr24";
+import { debugLog, debugWarn } from "../lib/debug";
+import { fr24 } from "../lib/fr24Client";
 
 const EMPTY: Fr24SearchResults = {
   airport: [],
@@ -24,14 +26,27 @@ export function useFr24Search() {
     }
     setLoading(true);
     setError(null);
+    const started = Date.now();
+    debugLog("search", "start", { query: q, limit });
     try {
       const data = await fr24.search(q, limit);
+      debugLog("search", `ok (${Date.now() - started}ms)`, {
+        live: data.live.length,
+        airport: data.airport.length,
+      });
       setResults(data);
       return data;
     } catch (err) {
       if (err instanceof Fr24Error) {
+        debugWarn("search", `failed (${Date.now() - started}ms)`, {
+          code: err.code,
+          message: err.message,
+        });
         setError(err.message);
       } else {
+        debugWarn("search", `failed (${Date.now() - started}ms)`, {
+          message: err instanceof Error ? err.message : "Search failed",
+        });
         setError(err instanceof Error ? err.message : "Search failed");
       }
       setResults(EMPTY);
