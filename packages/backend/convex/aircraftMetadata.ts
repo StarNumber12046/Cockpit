@@ -24,18 +24,3 @@ export const insertRow = internalMutation({
     });
   },
 });
-
-/**
- * Query to look up aircraft metadata by registration.
- * Returns null if not found.
- */
-export const getByRegistration = internalQuery({
-  args: { registration: v.string() },
-  handler: async (ctx, args) => {
-    const results = await ctx.db
-      .query("aircraftMetadata")
-      .withIndex("by_registration", (q) => q.eq("registration", args.registration))
-      .take(1);
-    return results[0] ?? null;
-  },
-});
