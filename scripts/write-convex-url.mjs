@@ -3,7 +3,7 @@
  * Called by convex deploy --cmd after the deploy succeeds.
  * Writes EXPO_PUBLIC_CONVEX_URL to GITHUB_ENV so the EAS build picks it up.
  */
-const fs = require("fs");
+import fs from "node:fs";
 
 const url = process.env.EXPO_PUBLIC_CONVEX_URL;
 if (!url) {
