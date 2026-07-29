@@ -5,8 +5,7 @@ import {
   Text,
   View,
 } from "react-native";
-import Svg, { Path, G, SvgXml } from "react-native-svg";
-import { type Fr24FlightDetails } from "@cockpit/fr24";
+import Svg, { SvgXml } from "react-native-svg";
 import { colors, radius, spacing, typography } from "../constants/theme";
 
 // ── Engine lookup ──────────────────────────────────────────────────────────
@@ -119,8 +118,10 @@ type Props = {
   airlineName?: string | null;
   /** Aircraft photo URI (from FR24 / Planespotters) */
   photoUri?: string | null;
-  /** Constructor / line number or other identifier to show top-right */
-  lineNumber?: string | null;
+  /** Engine type from airfleets (overrides auto-lookup) */
+  engines?: string | null;
+  /** Manufacturer serial number / MSN from airfleets */
+  serialNumber?: string | null;
 };
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -131,9 +132,10 @@ export function AircraftInfoCard({
   modelText,
   airlineName,
   photoUri,
-  lineNumber,
+  engines,
+  serialNumber,
 }: Props) {
-  const engine = useMemo(() => lookupEngine(aircraftCode), [aircraftCode]);
+  const engine = useMemo(() => engines || lookupEngine(aircraftCode), [engines, aircraftCode]);
 
   const displayModel = modelText || aircraftCode || "Unknown Aircraft";
   const displayReg = registration || "—";
@@ -150,8 +152,8 @@ export function AircraftInfoCard({
             {displayModel}
           </Text>
         </View>
-        {lineNumber ? (
-          <Text style={styles.lineNumber}>{lineNumber}</Text>
+        {serialNumber ? (
+          <Text style={styles.serialNumber}>{serialNumber}</Text>
         ) : null}
       </View>
 
@@ -224,7 +226,7 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     letterSpacing: 0.3,
   },
-  lineNumber: {
+  serialNumber: {
     fontSize: 14,
     fontWeight: "500",
     color: "#AAAAAA",

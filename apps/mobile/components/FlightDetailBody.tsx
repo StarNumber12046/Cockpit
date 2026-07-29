@@ -83,6 +83,12 @@ export function FlightDetailBody({
   const registration =
     detail?.aircraft?.registration || flight.registration || null;
 
+  // Look up airfleets-scraped metadata when we have a tail number
+  const aircraftMeta = useQuery(
+    api.getAircraftMetadata.getByRegistration,
+    registration ? { registration } : "skip",
+  );
+
   const canFetchAcars = Boolean(
     keys.icao24 || keys.callsign || keys.flightNumber,
   );
@@ -250,10 +256,11 @@ export function FlightDetailBody({
         <AircraftInfoCard
           registration={detail?.aircraft?.registration || flight.registration}
           aircraftCode={detail?.aircraft?.model?.code || flight.aircraftCode}
-          modelText={detail?.aircraft?.model?.text}
-          airlineName={detail?.airline?.name}
+          modelText={aircraftMeta?.type || detail?.aircraft?.model?.text}
+          airlineName={aircraftMeta?.operator || detail?.airline?.name}
           photoUri={aircraftPhoto?.uri}
-          lineNumber={undefined}
+          engines={aircraftMeta?.engines}
+          serialNumber={aircraftMeta?.serialNumber}
         />
       )}
 

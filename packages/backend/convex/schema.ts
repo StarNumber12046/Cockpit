@@ -129,4 +129,23 @@ export default defineSchema({
     .index("by_flightNumber", ["flightNumber"])
     .index("by_fr24Id", ["fr24Id"])
     .index("by_userId", ["userId"]),
+
+  /**
+   * Airfleets-scraped aircraft metadata indexed by registration.
+   * Populated via seedAircraftData action from airfleet-scraper CSV data.
+   */
+  aircraftMetadata: defineTable({
+    registration: v.string(),
+    /** Aircraft type/subtype (e.g. "737NG 824/W") */
+    type: v.string(),
+    /** Engine type (e.g. "CFM56 SERIES") */
+    engines: v.string(),
+    /** Manufacturer serial number / MSN */
+    serialNumber: v.string(),
+    /** Operator name */
+    operator: v.string(),
+    /** Aircraft family (e.g. "Boeing 737") */
+    family: v.string(),
+  })
+    .index("by_registration", ["registration"]),
 });
