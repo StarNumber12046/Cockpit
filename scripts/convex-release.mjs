@@ -43,15 +43,14 @@ if (!deployKey) {
 }
 
 const groqKey = process.env.GROQ_API_KEY?.trim();
-if (!groqKey) {
-  console.error("GROQ_API_KEY secret is required for Convex ACARS explain.");
-  process.exit(1);
+if (groqKey) {
+  runConvex(["env", "set", "GROQ_API_KEY", "--force"], {
+    input: groqKey,
+    label: "Setting GROQ_API_KEY on Convex deployment…",
+  });
+} else {
+  console.log("GROQ_API_KEY not set — skipping (ACARS explain will be unavailable).");
 }
-
-runConvex(["env", "set", "GROQ_API_KEY", "--force"], {
-  input: groqKey,
-  label: "Setting GROQ_API_KEY on Convex deployment…",
-});
 
 const explainModel = process.env.ACARS_EXPLAIN_MODEL?.trim();
 if (explainModel) {
