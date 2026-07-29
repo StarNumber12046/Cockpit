@@ -60,10 +60,10 @@ if (explainModel) {
 }
 
 const tag = process.env.GITHUB_REF_NAME ?? "release";
-const githubEnv = process.env.GITHUB_ENV;
-const writeUrlCmd = githubEnv
-  ? `require("fs").appendFileSync(process.env.GITHUB_ENV, "EXPO_PUBLIC_CONVEX_URL=" + process.env.EXPO_PUBLIC_CONVEX_URL + "\\n")`
-  : `process.stdout.write(process.env.EXPO_PUBLIC_CONVEX_URL || "")`;
+const writeUrlScript = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "./write-convex-url.mjs",
+);
 
 runConvex(
   [
@@ -71,7 +71,7 @@ runConvex(
     "--cmd-url-env-var-name",
     "EXPO_PUBLIC_CONVEX_URL",
     "--cmd",
-    `node -e "${writeUrlCmd}"`,
+    `node "${writeUrlScript}"`,
     "--message",
     `Release ${tag}`,
   ],
