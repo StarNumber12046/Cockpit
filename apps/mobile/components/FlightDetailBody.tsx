@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Image,
-  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -23,6 +21,7 @@ import {
   resolveAircraftPhoto,
   type AircraftPhoto,
 } from "../lib/media";
+import { AircraftInfoCard } from "./AircraftInfoCard";
 import { LoadingState } from "./LoadingState";
 import { EmptyState } from "./EmptyState";
 import { ErrorBanner } from "./ErrorBanner";
@@ -202,8 +201,6 @@ export function FlightDetailBody({
     };
   }, [detail, keys.icao24, registration]);
 
-  const trailLen = detail?.trail?.length ?? 0;
-
   return (
     <View style={styles.root}>
       {detailError ? (
@@ -249,9 +246,16 @@ export function FlightDetailBody({
 
       {photoLoading && !aircraftPhoto ? (
         <View style={styles.photoSkeleton} accessibilityLabel="Loading aircraft photo" />
-      ) : aircraftPhoto ? (
-        <AircraftPhotoCard photo={aircraftPhoto} />
-      ) : null}
+      ) : (
+        <AircraftInfoCard
+          registration={detail?.aircraft?.registration || flight.registration}
+          aircraftCode={detail?.aircraft?.model?.code || flight.aircraftCode}
+          modelText={detail?.aircraft?.model?.text}
+          airlineName={detail?.airline?.name}
+          photoUri={aircraftPhoto?.uri}
+          lineNumber={undefined}
+        />
+      )}
 
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -298,42 +302,6 @@ export function FlightDetailBody({
           ))
         )}
       </View>
-    </View>
-  );
-}
-
-function AircraftPhotoCard({ photo }: { photo: AircraftPhoto }) {
-  const [failed, setFailed] = useState(false);
-
-  if (failed) return null;
-
-  const credit = photo.photographer ? `© ${photo.photographer}` : null;
-
-  return (
-    <View style={styles.photoWrap}>
-      <Image
-        source={{ uri: photo.uri }}
-        style={styles.photo}
-        resizeMode="cover"
-        onError={() => setFailed(true)}
-        accessibilityLabel="Aircraft photo"
-      />
-      {credit ? (
-        photo.link ? (
-          <Pressable
-            onPress={() => void Linking.openURL(photo.link!)}
-            hitSlop={6}
-          >
-            <Text style={styles.photoCredit} numberOfLines={1}>
-              {credit}
-            </Text>
-          </Pressable>
-        ) : (
-          <Text style={styles.photoCredit} numberOfLines={1}>
-            {credit}
-          </Text>
-        )
-      ) : null}
     </View>
   );
 }
@@ -407,19 +375,6 @@ const styles = StyleSheet.create({
     color: colors.danger,
     flex: 1,
   },
-  photoWrap: {
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: "hidden",
-    backgroundColor: colors.bgCard,
-    gap: spacing.xs,
-  },
-  photo: {
-    width: "100%",
-    aspectRatio: 16 / 9,
-    backgroundColor: colors.bgCard,
-  },
   photoSkeleton: {
     width: "100%",
     aspectRatio: 16 / 9,
@@ -427,12 +382,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.bgCard,
-  },
-  photoCredit: {
-    ...typography.caption,
-    color: colors.textDim,
-    paddingHorizontal: spacing.sm,
-    paddingBottom: spacing.sm,
   },
   card: {
     backgroundColor: colors.bgCard,
