@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@ai-sdk/groq": "^4.0.6",
-    "@auth/core": "0.37.0",
+    "@auth/core": "0.41.3",
     "@cockpit/fr24": "workspace:*",
     "@cockpit/shared": "workspace:*",
     "@convex-dev/auth": "^0.0.94",
