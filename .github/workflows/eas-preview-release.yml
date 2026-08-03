@@ -55,6 +55,18 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      - name: Publish Convex URL to EAS env
+        run: |
+          if [ -n "${EXPO_PUBLIC_CONVEX_URL}" ]; then
+            cd apps/mobile
+            eas env:set EXPO_PUBLIC_CONVEX_URL "${EXPO_PUBLIC_CONVEX_URL}" \
+              --environment preview --environment development --environment production \
+              --scope project --non-interactive
+            echo "Published EXPO_PUBLIC_CONVEX_URL to EAS project env."
+          else
+            echo "EXPO_PUBLIC_CONVEX_URL not set — skipping EAS env publish."
+          fi
+
       - name: Build on EAS and download artifacts
         run: node scripts/eas-github-release.mjs
 
