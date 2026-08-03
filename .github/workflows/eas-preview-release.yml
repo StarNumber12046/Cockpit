@@ -59,7 +59,8 @@ jobs:
         run: |
           if [ -n "${EXPO_PUBLIC_CONVEX_URL}" ]; then
             cd apps/mobile
-            eas env:set EXPO_PUBLIC_CONVEX_URL "${EXPO_PUBLIC_CONVEX_URL}" \
+            eas env:set --name EXPO_PUBLIC_CONVEX_URL \
+              --value "${EXPO_PUBLIC_CONVEX_URL}" \
               --environment preview --environment development --environment production \
               --scope project --non-interactive
             echo "Published EXPO_PUBLIC_CONVEX_URL to EAS project env."
